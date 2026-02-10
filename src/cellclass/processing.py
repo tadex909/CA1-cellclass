@@ -127,3 +127,91 @@ def compute_acg(
         bin_ms=bin_ms,
         window_ms=window_ms,
     )
+
+#-----smoothing of the ACG-----
+def smooth_acg_boxcar(
+    acg: np.ndarray,
+    *,
+    window_ms: float = 5.0,
+    bin_ms: float = 1.0,
+    axis: int = 0,
+    mode: str = "reflect",
+) -> np.ndarray:
+    """
+    Smooth an ACG with a boxcar (moving average) window.
+
+    Parameters
+    ----------
+    acg : ndarray
+        ACG array, e.g. (n_lags, n_cells) or (n_lags,).
+    window_ms : float
+        Smoothing window in ms.
+    bin_ms : float
+        Bin size in ms.
+    axis : int
+        Axis corresponding to lag bins.
+    mode : str
+        Padding mode for np.pad: "reflect", "edge", "constant", ...
+
+    Returns
+    -------
+    smoothed : ndarray
+        Same shape as acg.
+    """
+    x = np.asarray(acg, dtype=np.float64)
+    w = int(round(window_ms / bin_ms))
+    w = max(1, w)
+    if w == 1:
+        return x.copy()
+
+    # make w odd so smoothing is centered
+    if w % 2 == 0:
+        w += 1
+    half = w // 2
+
+    # move axis to front
+    x0 = np.moveaxis(x, axis, 0)
+    pad_width = [(half, half)] + [(0, 0)] * (x0.ndim - 1)
+    xp = np.pad(x0, pad_width=pad_width, mode=mode)
+
+    kernel = np.ones(w, dtype=np.float64) / w
+    # convolve along first axis
+    out = np.empty_like(x0)
+    for idx in np.ndindex(x0.shape[1:]):
+        out[(slice(None),) + idx] = np.convolve(xp[(slice(None),) + idx], kernel, mode="valid")
+
+    return np.moveaxis(out, 0, axis)
+
+def smooth_acg_gaussian(
+    acg: np.ndarray,
+    *,
+    sigma_ms: float = 2.0,
+    bin_ms: float = 1.0,
+    axis: int = 0,
+    truncate: float = 3.0,
+    mode: str = "reflect",
+) -> np.ndarray:
+    """
+    Smooth an ACG with a Gaussian kernel.
+
+    sigma_ms ~ 2ms gives ~5ms-ish smoothing (since kernel spans ~6*sigma).
+    """
+    x = np.asarray(acg, dtype=np.float64)
+    sigma_bins = sigma_ms / bin_ms
+    if sigma_bins <= 0:
+        return x.copy()
+
+    radius = int(np.ceil(truncate * sigma_bins))
+    kx = np.arange(-radius, radius + 1)
+    kernel = np.exp(-0.5 * (kx / sigma_bins) ** 2)
+    kernel /= kernel.sum()
+
+    x0 = np.moveaxis(x, axis, 0)
+    pad_width = [(radius, radius)] + [(0, 0)] * (x0.ndim - 1)
+    xp = np.pad(x0, pad_width=pad_width, mode=mode)
+
+    out = np.empty_like(x0)
+    for idx in np.ndindex(x0.shape[1:]):
+        out[(slice(None),) + idx] = np.convolve(xp[(slice(None),) + idx], kernel, mode="valid")
+
+    return np.moveaxis(out, 0, axis)

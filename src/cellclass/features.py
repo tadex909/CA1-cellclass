@@ -1,9 +1,8 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional, Tuple
-
 import numpy as np
-
+from typing import Tuple
 
 @dataclass
 class RefractoryResult:
@@ -332,3 +331,183 @@ def refractory_ms_derivative_sd(
         deriv_sd=deriv_sd,
         valid=valid,
     )
+
+@dataclass
+class WaveformFeatResult:
+    width_ms: np.ndarray         # (n_cells,)
+    asym: np.ndarray             # (n_cells,)
+    pt_ratio: np.ndarray         # (n_cells,)
+    valid: np.ndarray            # (n_cells,) bool
+
+
+def _trimmed_mean(x: np.ndarray, trim: int) -> float:
+    x = x[np.isfinite(x)]
+    if x.size == 0:
+        return np.nan
+    x = np.sort(x)
+    if 2 * trim >= x.size:
+        return np.nan
+    return float(np.mean(x[trim : x.size - trim]))
+
+
+def waveform_features_from_bests(
+    bestswaveforms: np.ndarray,
+    fs_hz: float,
+    *,
+    peak_search_ms: float = 1.6,
+    trim: int = 5,
+    eps: float = 1e-12,
+) -> WaveformFeatResult:
+    """
+    Compute waveform width (trough-to-peak latency) and asymmetry per cell,
+    using a trimmed mean across waveforms.
+
+    Parameters
+    ----------
+    bestswaveforms : array (t_step, n_waveforms, n_cells)
+        Waveforms on the best channel, multiple sampled spikes per cell.
+    fs_hz : float
+        Sampling frequency in Hz (e.g., 25000).
+    peak_search_ms : float
+        Search window after trough to find the peak.
+    trim : int
+        Number of extreme waveforms to discard at each tail when averaging.
+    """
+    W = np.asarray(bestswaveforms, dtype=np.float64)
+    if W.ndim != 3:
+        raise ValueError(f"Expected bestswaveforms ndim=3, got shape {W.shape}")
+
+    t_step, n_wf, n_cells = W.shape
+    peak_search_samp = int(round((peak_search_ms / 1000.0) * fs_hz))
+    peak_search_samp = max(1, peak_search_samp)
+
+    width_ms = np.full(n_cells, np.nan, dtype=np.float64)
+    asym = np.full(n_cells, np.nan, dtype=np.float64)
+    pt_ratio = np.full(n_cells, np.nan, dtype=np.float64)
+    valid = np.zeros(n_cells, dtype=bool)
+
+    for c in range(n_cells):
+        widths = np.full(n_wf, np.nan, dtype=np.float64)
+        asyms = np.full(n_wf, np.nan, dtype=np.float64)
+        ptrs = np.full(n_wf, np.nan, dtype=np.float64)
+
+        for k in range(n_wf):
+            w = W[:, k, c]
+            w = w - np.mean(w[:5])
+
+            if not np.any(np.isfinite(w)):
+                continue
+
+            tmin = int(np.nanargmin(w))
+            # search peak AFTER trough within window
+            t1 = min(t_step, tmin + peak_search_samp + 1)
+            if t1 <= tmin + 1:
+                continue
+
+            post = w[tmin:t1]
+            tmax_rel = int(np.nanargmax(post))
+            tmax = tmin + tmax_rel
+
+            A_trough = w[tmin]
+            A_peak = w[tmax]
+
+            # width in ms
+            widths[k] = (tmax - tmin) * 1000.0 / fs_hz
+
+            # peak-to-trough ratio
+            ptrs[k] = (A_peak + eps) / (abs(A_trough) + eps)
+
+            # asymmetry in [-1,1]
+            asyms[k] = (A_peak - abs(A_trough)) / (A_peak + abs(A_trough) + eps)
+
+        w_mean = _trimmed_mean(widths, trim=trim)
+        a_mean = _trimmed_mean(asyms, trim=trim)
+        p_mean = _trimmed_mean(ptrs, trim=trim)
+
+        width_ms[c] = w_mean
+        asym[c] = a_mean
+        pt_ratio[c] = p_mean
+        valid[c] = np.isfinite(w_mean)
+
+    return WaveformFeatResult(width_ms=width_ms, asym=asym, pt_ratio=pt_ratio, valid=valid)
+
+
+@dataclass(frozen=True)
+class SpikeShape:
+    baseline_min: float
+    baseline_idx: int
+
+    pre_peak_val: float
+    pre_peak_idx: int
+
+    trough_val: float
+    trough_idx: int
+
+    post_peak_val: float
+    post_peak_idx: int
+
+    fs_hz: float
+
+    @property
+    def pre_peak_t(self) -> float:
+        return (self.pre_peak_idx + 1) / self.fs_hz
+
+    @property
+    def trough_t(self) -> float:
+        return (self.trough_idx + 1) / self.fs_hz
+
+    @property
+    def post_peak_t(self) -> float:
+        return (self.post_peak_idx + 1) / self.fs_hz
+
+    @property
+    def peak_to_trough_ms(self) -> float:
+        return (self.trough_t - self.pre_peak_t) * 1000.0
+
+    @property
+    def trough_to_rebound_ms(self) -> float:
+        return (self.post_peak_t - self.trough_t) * 1000.0
+
+    @property
+    def asymmetry(self) -> float:
+        a1 = self.pre_peak_val - self.baseline_min
+        a2 = self.post_peak_val - self.baseline_min
+        return (a1 - a2) / (a1 + a2 + 1e-12)
+    
+def extract_spike_shape(waveform: np.ndarray, fs_hz: float) -> SpikeShape:
+    w = np.asarray(waveform, dtype=np.float64)
+
+    trough_idx = int(np.argmin(w))
+    trough_val = w[trough_idx]
+
+    # pre-trough peak
+    pre_seg = w[: trough_idx + 1]
+    pre_peak_idx = int(np.argmax(pre_seg))
+    pre_peak_val = w[pre_peak_idx]
+
+    # post-trough rebound: first crossing ≥ pre_peak_val
+    post_seg = w[trough_idx:]
+    above = np.flatnonzero(post_seg >= pre_peak_val)
+    if above.size > 0:
+        post_peak_idx = trough_idx + int(above[0])
+    else:
+        post_peak_idx = trough_idx + int(np.argmax(post_seg))
+    post_peak_val = w[post_peak_idx]
+
+    # baseline minimum before pre_peak
+    base_seg = w[: pre_peak_idx + 1]
+    baseline_idx = int(np.argmin(base_seg))
+    baseline_min = w[baseline_idx]
+
+    return SpikeShape(
+        baseline_min=baseline_min,
+        baseline_idx=baseline_idx,
+        pre_peak_val=pre_peak_val,
+        pre_peak_idx=pre_peak_idx,
+        trough_val=trough_val,
+        trough_idx=trough_idx,
+        post_peak_val=post_peak_val,
+        post_peak_idx=post_peak_idx,
+        fs_hz=fs_hz,
+    )
+
