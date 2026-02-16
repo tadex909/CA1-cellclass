@@ -1,4 +1,12 @@
-*.mat!data/.gitkeep
+*.mat
+*.npz
+*.h5
+*.parquet
+*.log
+*.pyc
+#ignore everything in the data folder except for the .gitkeep file
+data/*
+!data/.gitkeep
 #ignore everything in the results folder except for results/tables and results/figures
 results/*
 !results/tables
