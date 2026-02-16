@@ -1,1 +1,5 @@
-*.mat
+*.mat!data/.gitkeep
+#ignore everything in the results folder except for results/tables and results/figures
+results/*
+!results/tables
+!results/figures

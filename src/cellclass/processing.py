@@ -1,6 +1,5 @@
-#The following script takes script from data/interim and processes it to create the final NPZ files in data/processed. It also adds metadata about the source .mat file and the processing time.
 from __future__ import annotations
-
+#The following script takes script from data/interim and processes it to create the final NPZ files in data/processed. It also adds metadata about the source .mat file and the processing time.
 from dataclasses import dataclass
 from typing import Literal, Optional, Tuple
 
@@ -14,6 +13,16 @@ NormalizeMode = Literal["count", "per_spike", "rate_hz"]
 class ACGResult:
     bin_centers_ms: np.ndarray          # shape (2*n_bins + 1,)
     acg: np.ndarray                     # shape (2*n_bins + 1, n_cells)
+    cell_ids: np.ndarray                # shape (n_cells,)
+    normalize: str
+    bin_ms: float
+    window_ms: float
+
+
+@dataclass
+class CCGResult:
+    bin_centers_ms: np.ndarray          # shape (2*n_bins + 1,)
+    ccg: np.ndarray                     # shape (2*n_bins + 1, n_cells, n_cells)
     cell_ids: np.ndarray                # shape (n_cells,)
     normalize: str
     bin_ms: float
@@ -44,6 +53,42 @@ def _acg_one_unit(times_s: np.ndarray, bin_s: float, window_s: float) -> np.ndar
         # Bin indices
         b = np.floor(dt / bin_s).astype(np.int64)
         # Safety: dt==window can land in bin n_bins (rare float edge); clip
+        b = b[(b >= 0) & (b < n_bins)]
+        if b.size:
+            hist_pos += np.bincount(b, minlength=n_bins).astype(np.int64)
+
+    return hist_pos
+
+
+def _ccg_one_pair(
+    times_a_s: np.ndarray,
+    times_b_s: np.ndarray,
+    bin_s: float,
+    window_s: float,
+) -> np.ndarray:
+    """
+    Positive-lag histogram from A to B.
+    Returns hist_pos with length n_bins, where bin k counts dt in [k*bin_s, (k+1)*bin_s).
+    """
+    times_a_s = np.asarray(times_a_s, dtype=np.float64)
+    times_b_s = np.asarray(times_b_s, dtype=np.float64)
+    n_bins = int(np.ceil(window_s / bin_s))
+    if times_a_s.size == 0 or times_b_s.size == 0:
+        return np.zeros(n_bins, dtype=np.int64)
+
+    times_a_s = np.sort(times_a_s)
+    times_b_s = np.sort(times_b_s)
+    hist_pos = np.zeros(n_bins, dtype=np.int64)
+
+    # For each spike in A, count spikes in B in (t_a, t_a + window]
+    for i in range(times_a_s.size):
+        t0 = times_a_s[i]
+        start = np.searchsorted(times_b_s, t0, side="right")
+        stop = np.searchsorted(times_b_s, t0 + window_s, side="right")
+        if stop <= start:
+            continue
+        dt = times_b_s[start:stop] - t0
+        b = np.floor(dt / bin_s).astype(np.int64)
         b = b[(b >= 0) & (b < n_bins)]
         if b.size:
             hist_pos += np.bincount(b, minlength=n_bins).astype(np.int64)
@@ -126,6 +171,129 @@ def compute_acg(
         normalize=normalize,
         bin_ms=bin_ms,
         window_ms=window_ms,
+    )
+
+
+def compute_ccg(
+    spike_times_s: np.ndarray,
+    spike_cluster_ids: np.ndarray,
+    cell_ids: Optional[np.ndarray] = None,
+    *,
+    bin_ms: float = 1.0,
+    window_ms: float = 50.0,
+    normalize: NormalizeMode = "rate_hz",
+    include_auto: bool = False,
+) -> CCGResult:
+    """
+    Compute cross-correlograms for all cell pairs.
+
+    Parameters
+    ----------
+    spike_times_s : (N,) float
+        Spike times in seconds.
+    spike_cluster_ids : (N,) int
+        Cluster id per spike.
+    cell_ids : (C,) int, optional
+        Which cluster ids to compute CCG for. If None, uses sorted unique cluster ids.
+    bin_ms : float
+        Bin width in milliseconds.
+    window_ms : float
+        Half-window in milliseconds. Output covers [-window_ms, +window_ms].
+    normalize : {"count","per_spike","rate_hz"}
+        Normalization for the CCG values (per spike of the reference cell).
+    include_auto : bool
+        If True, fills diagonal with ACG counts. If False, diagonal is zeros.
+
+    Returns
+    -------
+    CCGResult
+    """
+    spike_times_s = np.asarray(spike_times_s, dtype=np.float64).reshape(-1)
+    spike_cluster_ids = np.asarray(spike_cluster_ids).reshape(-1)
+    assert spike_times_s.shape[0] == spike_cluster_ids.shape[0], "times and ids must match length"
+
+    if cell_ids is None:
+        cell_ids = np.unique(spike_cluster_ids)
+    cell_ids = np.asarray(cell_ids).reshape(-1)
+
+    bin_s = bin_ms / 1000.0
+    window_s = window_ms / 1000.0
+    n_bins = int(np.ceil(window_s / bin_s))
+
+    pos_centers = (np.arange(n_bins) + 0.5) * bin_ms
+    bin_centers_ms = np.concatenate([-pos_centers[::-1], [0.0], pos_centers])
+
+    n_cells = cell_ids.size
+    ccg = np.zeros((2 * n_bins + 1, n_cells, n_cells), dtype=np.float64)
+
+    # Pre-split spike times by cell for reuse
+    times_by_cell = [spike_times_s[spike_cluster_ids == cid] for cid in cell_ids]
+
+    for i in range(n_cells):
+        t_i = times_by_cell[i]
+        for j in range(n_cells):
+            if i == j and not include_auto:
+                continue
+            t_j = times_by_cell[j]
+            if i == j and include_auto:
+                hist_pos = _acg_one_unit(t_i, bin_s=bin_s, window_s=window_s)
+                hist_full = np.concatenate([hist_pos[::-1], np.array([0], dtype=np.int64), hist_pos])
+            else:
+                hist_pos_ij = _ccg_one_pair(t_i, t_j, bin_s=bin_s, window_s=window_s)
+                hist_pos_ji = _ccg_one_pair(t_j, t_i, bin_s=bin_s, window_s=window_s)
+                hist_full = np.concatenate([hist_pos_ji[::-1], np.array([0], dtype=np.int64), hist_pos_ij])
+
+            if normalize == "count":
+                ccg[:, i, j] = hist_full
+            elif normalize == "per_spike":
+                denom = max(t_i.size, 1)
+                ccg[:, i, j] = hist_full / denom
+            elif normalize == "rate_hz":
+                denom = max(t_i.size, 1) * bin_s
+                ccg[:, i, j] = hist_full / denom
+            else:
+                raise ValueError(f"Unknown normalize={normalize}")
+
+    return CCGResult(
+        bin_centers_ms=bin_centers_ms,
+        ccg=ccg,
+        cell_ids=cell_ids,
+        normalize=normalize,
+        bin_ms=bin_ms,
+        window_ms=window_ms,
+    )
+
+
+def compute_ccg_from_npz(
+    npz_path: str,
+    *,
+    bin_ms: float = 1.0,
+    window_ms: float = 50.0,
+    normalize: NormalizeMode = "rate_hz",
+    include_auto: bool = False,
+    time_key: str = "allcel__time_spk",
+    id_key: str = "allcel__id_spk",
+    cell_ids_key: str = "allcel__id_cel",
+) -> CCGResult:
+    """
+    Load an interim NPZ and compute CCGs between neurons.
+    """
+    z = np.load(npz_path, allow_pickle=False)
+    spike_times_s = z[time_key].astype(np.float64)
+    spike_cluster_ids = z[id_key].astype(np.int64)
+    if cell_ids_key in z:
+        cell_ids = z[cell_ids_key].astype(np.int64)
+    else:
+        cell_ids = None
+
+    return compute_ccg(
+        spike_times_s=spike_times_s,
+        spike_cluster_ids=spike_cluster_ids,
+        cell_ids=cell_ids,
+        bin_ms=bin_ms,
+        window_ms=window_ms,
+        normalize=normalize,
+        include_auto=include_auto,
     )
 
 #-----smoothing of the ACG-----

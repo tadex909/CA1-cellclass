@@ -229,8 +229,9 @@ def iter_mat_files(input_root: Path, recursive: bool) -> Iterable[Path]:
 
 
 def main() -> None:
+    
     ap = argparse.ArgumentParser()
-    ap.add_argument("--input", type=str, default="data/raw", help="Input .mat file or directory (can be network path).")
+    ap.add_argument("--input", type=str, default="Epsztein-nas02/TEAM/Tadeo/data/raw", help="Input .mat file or directory (can be network path).")
     ap.add_argument("--output", type=str, default="data/interim", help="Output directory for .npz files.")
     ap.add_argument("--recursive", action="store_true", help="Recursively search for .mat files.")
     ap.add_argument("--overwrite", action="store_true", help="Overwrite existing .npz files.")
@@ -238,7 +239,10 @@ def main() -> None:
     ap.add_argument("--dry-run", action="store_true", help="Only print what would be converted.")
     args = ap.parse_args()
 
-    in_path = Path(args.input)
+    raw_dir = Path(r"\\Epsztein-nas02\TEAM\Tadeo\data\raw")
+    print(raw_dir.exists())
+
+    in_path = raw_dir
     out_root = Path(args.output)
     out_root.mkdir(parents=True, exist_ok=True)
 

@@ -2,7 +2,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional, Tuple
 import numpy as np
-from typing import Tuple
 
 @dataclass
 class RefractoryResult:
@@ -78,13 +77,6 @@ def refractory_ms_from_acg(
         threshold=threshold,
         valid=valid,
     )
-
-from __future__ import annotations
-
-from dataclasses import dataclass
-from typing import Optional, Tuple
-
-import numpy as np
 
 
 @dataclass
@@ -230,10 +222,13 @@ def burst_index_from_acg(
 
 @dataclass
 class RefractoryDerivResult:
-    refractory_ms: np.ndarray   # (n_cells,)
-    peak_ms: np.ndarray         # (n_cells,)
-    deriv_sd: np.ndarray        # (n_cells,)
-    valid: np.ndarray           # (n_cells,) bool
+    refractory_ms_center: np.ndarray  # (n_cells,)
+    refractory_ms_edge: np.ndarray    # (n_cells,)
+    peak_ms_center: np.ndarray        # (n_cells,)
+    peak_ms_edge: np.ndarray          # (n_cells,)
+    deriv_sd: np.ndarray              # (n_cells,)
+    valid: np.ndarray                 # (n_cells,) bool
+    bin_ms: float
 
 
 def refractory_ms_derivative_sd(
@@ -244,192 +239,96 @@ def refractory_ms_derivative_sd(
     require_peak_ge: int = 1,
 ) -> RefractoryDerivResult:
     """
-    Royer/Buzsáki-style refractory period from ACG counts with 1 ms bins.
+    Royer/Buzsáki-style refractory period from ACG counts.
+
+    Works with bin centers at 0,1,2,... OR 0.5,1.5,2.5,... etc.
+    We return both:
+      - center convention: the bin center time
+      - edge convention: center - bin_ms/2 (clipped at 0)
 
     Steps (per cell):
-      1) take positive-lag ACG including 0
-      2) find the peak time within search_peak_ms
-      3) compute derivative d[k] = acg[k] - acg[k-1] from 0 to peak
-      4) compute sd = std(d)
+      1) use non-negative lags (>=0)
+      2) find ACG peak within search_peak_ms
+      3) compute derivative d[k] = y[k] - y[k-1] from start to peak
+      4) sd = std(d)
       5) refractory = first bin where d[k] > sd
-
-    Notes:
-      - Works best with bin_ms = 1.0
-      - If peak is too small or undefined -> returns NaN, valid=False
     """
     acg_counts = np.asarray(acg_counts)
     lags = np.asarray(bin_centers_ms, dtype=np.float64)
-    assert acg_counts.shape[0] == lags.shape[0]
+    if acg_counts.shape[0] != lags.shape[0]:
+        raise ValueError("acg_counts and bin_centers_ms must have same first dimension")
 
-    if acg_counts.dtype.kind not in ("i", "u", "f"):
-        raise ValueError("acg_counts must be numeric.")
+    # Estimate bin size robustly
+    if lags.size < 2:
+        raise ValueError("Need at least 2 lag bins")
+    bin_ms = float(np.median(np.diff(lags)))
+    if not np.isfinite(bin_ms) or bin_ms <= 0:
+        raise ValueError("Could not infer a valid bin_ms from bin_centers_ms")
 
-    # Use positive lags including 0
+    # Use non-negative lags
     pos_mask = lags >= 0
     lags_pos = lags[pos_mask]
     acg_pos = np.asarray(acg_counts[pos_mask, :], dtype=np.float64)  # (n_pos, n_cells)
-
-    # sanity: ensure 0 ms exists as first bin
-    # If your bin centers are 0.5, 1.5, ... you need to adapt. With our compute_acg it’s 0 at center.
-    if lags_pos.size == 0 or lags_pos[0] != 0.0:
-        # We can still proceed, but interpretation changes.
-        # Better to enforce our compute_acg convention.
-        raise ValueError("Expected bin_centers_ms to include 0.0 at the first non-negative bin.")
+    if lags_pos.size < 2:
+        raise ValueError("Not enough non-negative lag bins to compute derivative")
 
     lo, hi = search_peak_ms
     peak_search = (lags_pos >= lo) & (lags_pos <= hi)
-    if not np.any(peak_search):
-        raise ValueError("search_peak_ms does not overlap available positive lags.")
+    idx_candidates = np.where(peak_search)[0]
+    if idx_candidates.size == 0:
+        raise ValueError("search_peak_ms does not overlap available non-negative lags")
 
     n_cells = acg_pos.shape[1]
-    refractory = np.full(n_cells, np.nan, dtype=np.float64)
-    peak_ms = np.full(n_cells, np.nan, dtype=np.float64)
+    refractory_center = np.full(n_cells, np.nan, dtype=np.float64)
+    peak_center = np.full(n_cells, np.nan, dtype=np.float64)
     deriv_sd = np.full(n_cells, np.nan, dtype=np.float64)
     valid = np.zeros(n_cells, dtype=bool)
-
-    # indices in the positive-lag array
-    idx_candidates = np.where(peak_search)[0]
 
     for j in range(n_cells):
         y = acg_pos[:, j]
 
-        # find peak within the search window
         ywin = y[idx_candidates]
         if not np.any(np.isfinite(ywin)):
             continue
 
         peak_rel = int(np.nanargmax(ywin))
-        peak_idx = idx_candidates[peak_rel]
+        peak_idx = int(idx_candidates[peak_rel])
         peak_val = y[peak_idx]
-
-        if peak_val < require_peak_ge:
-            # too few counts / too flat -> unreliable
+        if not np.isfinite(peak_val) or peak_val < require_peak_ge:
             continue
 
-        # derivative from 0 up to peak: d[1..peak_idx] (since d[k]=y[k]-y[k-1])
         if peak_idx < 1:
             continue
-        d = np.diff(y[: peak_idx + 1])
 
+        # derivative from first bin up to peak bin
+        d = np.diff(y[: peak_idx + 1])
         sd = float(np.nanstd(d))
         deriv_sd[j] = sd
-        peak_ms[j] = lags_pos[peak_idx]
+        peak_center[j] = lags_pos[peak_idx]
 
         if not np.isfinite(sd) or sd <= 0:
             continue
 
-        # first k where derivative exceeds 1 sd
         above = d > sd
         if np.any(above):
-            k = int(np.argmax(above)) + 1  # +1 because d is between bins (k-1 -> k)
-            refractory[j] = lags_pos[k]
+            k = int(np.argmax(above)) + 1  # +1 because d indexes transitions to bin k
+            refractory_center[j] = lags_pos[k]
             valid[j] = True
 
+    # Convert center -> edge convention
+    refractory_edge = np.maximum(refractory_center - bin_ms / 2.0, 0.0)
+    peak_edge = np.maximum(peak_center - bin_ms / 2.0, 0.0)
+
     return RefractoryDerivResult(
-        refractory_ms=refractory,
-        peak_ms=peak_ms,
+        refractory_ms_center=refractory_center,
+        refractory_ms_edge=refractory_edge,
+        peak_ms_center=peak_center,
+        peak_ms_edge=peak_edge,
         deriv_sd=deriv_sd,
         valid=valid,
+        bin_ms=bin_ms,
     )
 
-@dataclass
-class WaveformFeatResult:
-    width_ms: np.ndarray         # (n_cells,)
-    asym: np.ndarray             # (n_cells,)
-    pt_ratio: np.ndarray         # (n_cells,)
-    valid: np.ndarray            # (n_cells,) bool
-
-
-def _trimmed_mean(x: np.ndarray, trim: int) -> float:
-    x = x[np.isfinite(x)]
-    if x.size == 0:
-        return np.nan
-    x = np.sort(x)
-    if 2 * trim >= x.size:
-        return np.nan
-    return float(np.mean(x[trim : x.size - trim]))
-
-
-def waveform_features_from_bests(
-    bestswaveforms: np.ndarray,
-    fs_hz: float,
-    *,
-    peak_search_ms: float = 1.6,
-    trim: int = 5,
-    eps: float = 1e-12,
-) -> WaveformFeatResult:
-    """
-    Compute waveform width (trough-to-peak latency) and asymmetry per cell,
-    using a trimmed mean across waveforms.
-
-    Parameters
-    ----------
-    bestswaveforms : array (t_step, n_waveforms, n_cells)
-        Waveforms on the best channel, multiple sampled spikes per cell.
-    fs_hz : float
-        Sampling frequency in Hz (e.g., 25000).
-    peak_search_ms : float
-        Search window after trough to find the peak.
-    trim : int
-        Number of extreme waveforms to discard at each tail when averaging.
-    """
-    W = np.asarray(bestswaveforms, dtype=np.float64)
-    if W.ndim != 3:
-        raise ValueError(f"Expected bestswaveforms ndim=3, got shape {W.shape}")
-
-    t_step, n_wf, n_cells = W.shape
-    peak_search_samp = int(round((peak_search_ms / 1000.0) * fs_hz))
-    peak_search_samp = max(1, peak_search_samp)
-
-    width_ms = np.full(n_cells, np.nan, dtype=np.float64)
-    asym = np.full(n_cells, np.nan, dtype=np.float64)
-    pt_ratio = np.full(n_cells, np.nan, dtype=np.float64)
-    valid = np.zeros(n_cells, dtype=bool)
-
-    for c in range(n_cells):
-        widths = np.full(n_wf, np.nan, dtype=np.float64)
-        asyms = np.full(n_wf, np.nan, dtype=np.float64)
-        ptrs = np.full(n_wf, np.nan, dtype=np.float64)
-
-        for k in range(n_wf):
-            w = W[:, k, c]
-            w = w - np.mean(w[:5])
-
-            if not np.any(np.isfinite(w)):
-                continue
-
-            tmin = int(np.nanargmin(w))
-            # search peak AFTER trough within window
-            t1 = min(t_step, tmin + peak_search_samp + 1)
-            if t1 <= tmin + 1:
-                continue
-
-            post = w[tmin:t1]
-            tmax_rel = int(np.nanargmax(post))
-            tmax = tmin + tmax_rel
-
-            A_trough = w[tmin]
-            A_peak = w[tmax]
-
-            # width in ms
-            widths[k] = (tmax - tmin) * 1000.0 / fs_hz
-
-            # peak-to-trough ratio
-            ptrs[k] = (A_peak + eps) / (abs(A_trough) + eps)
-
-            # asymmetry in [-1,1]
-            asyms[k] = (A_peak - abs(A_trough)) / (A_peak + abs(A_trough) + eps)
-
-        w_mean = _trimmed_mean(widths, trim=trim)
-        a_mean = _trimmed_mean(asyms, trim=trim)
-        p_mean = _trimmed_mean(ptrs, trim=trim)
-
-        width_ms[c] = w_mean
-        asym[c] = a_mean
-        pt_ratio[c] = p_mean
-        valid[c] = np.isfinite(w_mean)
-
-    return WaveformFeatResult(width_ms=width_ms, asym=asym, pt_ratio=pt_ratio, valid=valid)
 
 
 @dataclass(frozen=True)
@@ -511,3 +410,129 @@ def extract_spike_shape(waveform: np.ndarray, fs_hz: float) -> SpikeShape:
         fs_hz=fs_hz,
     )
 
+@dataclass
+class WaveformFeatResult:
+    spk_duration_ms: np.ndarray        # (n_cells,)
+    spk_peaktrough_ms: np.ndarray      # (n_cells,)
+    spk_asymmetry: np.ndarray          # (n_cells,)
+    valid: np.ndarray                  # (n_cells,) bool
+
+@dataclass
+class WaveformFeatResult:
+    spk_duration_ms: np.ndarray        # (n_cells,)
+    spk_peaktrough_ms: np.ndarray      # (n_cells,)
+    spk_asymmetry: np.ndarray          # (n_cells,)
+    valid: np.ndarray                  # (n_cells,) bool
+
+
+def _trimmed_mean(x: np.ndarray, trim: int) -> float:
+    """Drop `trim` values at each tail after sorting; return mean of remaining."""
+    x = x[np.isfinite(x)]
+    if x.size == 0:
+        return np.nan
+    x = np.sort(x)
+    if 2 * trim >= x.size:
+        return np.nan
+    return float(np.mean(x[trim : x.size - trim]))
+
+
+def waveform_features_from_bestswaveforms(
+    bestswaveforms: np.ndarray,
+    fs_hz: float,
+    *,
+    trim: int = 5,
+) -> WaveformFeatResult:
+    """
+    Compute waveform features per cell from bestswaveforms using extract_spike_shape.
+
+    Parameters
+    ----------
+    bestswaveforms : np.ndarray
+        Shape (t_step, n_waveforms, n_cells).
+    fs_hz : float
+        Waveform sampling rate (e.g., 25000).
+    trim : int
+        Number of waveforms to drop at each tail for robust averaging
+        (Vinca uses 5: mean(sorted_vals(5:end-5))).
+
+    Returns
+    -------
+    WaveformFeatResult
+    """
+    W = np.asarray(bestswaveforms, dtype=np.float64)
+    if W.ndim != 3:
+        raise ValueError(f"Expected bestswaveforms with ndim=3, got shape {W.shape}")
+
+    t_step, n_wf, n_cells = W.shape
+    if fs_hz <= 0:
+        raise ValueError("fs_hz must be > 0")
+
+    spk_duration_ms = np.full(n_cells, np.nan, dtype=np.float64)
+    spk_peaktrough_ms = np.full(n_cells, np.nan, dtype=np.float64)
+    spk_asymmetry = np.full(n_cells, np.nan, dtype=np.float64)
+    valid = np.zeros(n_cells, dtype=bool)
+
+    for c in range(n_cells):
+        dur = np.full(n_wf, np.nan, dtype=np.float64)
+        pt = np.full(n_wf, np.nan, dtype=np.float64)
+        asym = np.full(n_wf, np.nan, dtype=np.float64)
+
+        for j in range(n_wf):
+            w = W[:, j, c]
+            if not np.any(np.isfinite(w)):
+                continue
+
+            shape = extract_spike_shape(w, fs_hz)
+
+            # These names come from the SpikeShape class we defined earlier
+            dur[j] = shape.trough_to_rebound_ms
+            pt[j] = shape.peak_to_trough_ms
+            asym[j] = shape.asymmetry
+
+        spk_duration_ms[c] = _trimmed_mean(dur, trim=trim)
+        spk_peaktrough_ms[c] = _trimmed_mean(pt, trim=trim)
+        spk_asymmetry[c] = _trimmed_mean(asym, trim=trim)
+
+        valid[c] = np.isfinite(spk_duration_ms[c]) and np.isfinite(spk_peaktrough_ms[c]) and np.isfinite(spk_asymmetry[c])
+
+    return WaveformFeatResult(
+        spk_duration_ms=spk_duration_ms,
+        spk_peaktrough_ms=spk_peaktrough_ms,
+        spk_asymmetry=spk_asymmetry,
+        valid=valid,
+    )
+
+def acg_peak_latency_ms(
+    acg_counts: np.ndarray,
+    bin_centers_ms: np.ndarray,
+    *,
+    search_ms: Tuple[float, float] = (1.0, 50.0),
+    use_positive_only: bool = True,
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Returns:
+      peak_latency_ms: (n_cells,)
+      peak_value:      (n_cells,)
+    """
+    acg = np.asarray(acg_counts, dtype=np.float64)
+    lags = np.asarray(bin_centers_ms, dtype=np.float64)
+    assert acg.shape[0] == lags.shape[0]
+
+    if use_positive_only:
+        m = lags > 0
+        lags = lags[m]
+        acg = acg[m, :]
+
+    lo, hi = search_ms
+    m = (lags >= lo) & (lags <= hi)
+    if not np.any(m):
+        raise ValueError("search_ms does not overlap available lags.")
+
+    l = lags[m]
+    a = acg[m, :]  # (n_bins, n_cells)
+
+    peak_idx = np.nanargmax(a, axis=0)
+    peak_latency = l[peak_idx]
+    peak_value = a[peak_idx, np.arange(a.shape[1])]
+
+    return peak_latency, peak_value
