@@ -170,22 +170,29 @@ def rank_results(df: pd.DataFrame) -> pd.DataFrame:
     if d.empty:
         return d
 
+    # Primary selection rule:
+    # 1) lower BIC
+    # 2) higher silhouette
+    # 3) lower Davies-Bouldin
+    # 4) lower AIC
+    # 5) higher Calinski-Harabasz (final tie-breaker)
+    d = d.sort_values(
+        ["bic", "silhouette", "davies_bouldin", "aic", "calinski_harabasz"],
+        ascending=[True, False, True, True, False],
+        na_position="last",
+    ).reset_index(drop=True)
+
+    # Keep directional ranks for inspection/debugging in the ranked CSV.
     d["rank_bic"] = d["bic"].rank(method="average", ascending=True, na_option="bottom")
-    d["rank_aic"] = d["aic"].rank(method="average", ascending=True, na_option="bottom")
     d["rank_silhouette"] = d["silhouette"].rank(
-        method="average", ascending=False, na_option="bottom"
-    )
-    d["rank_calinski"] = d["calinski_harabasz"].rank(
         method="average", ascending=False, na_option="bottom"
     )
     d["rank_davies"] = d["davies_bouldin"].rank(
         method="average", ascending=True, na_option="bottom"
     )
-
-    rank_cols = ["rank_bic", "rank_aic", "rank_silhouette", "rank_calinski", "rank_davies"]
-    d["mean_rank"] = d[rank_cols].mean(axis=1, skipna=True)
-    d = d.sort_values(["mean_rank", "bic", "aic"], ascending=[True, True, True]).reset_index(
-        drop=True
+    d["rank_aic"] = d["aic"].rank(method="average", ascending=True, na_option="bottom")
+    d["rank_calinski"] = d["calinski_harabasz"].rank(
+        method="average", ascending=False, na_option="bottom"
     )
     return d
 
@@ -438,7 +445,6 @@ def evaluate_age_group(
                 if (pd.isna(best["davies_bouldin"]) or not np.isfinite(best["davies_bouldin"]))
                 else float(best["davies_bouldin"])
             ),
-            "mean_rank": float(best["mean_rank"]),
             "n_effective_clusters": int(best["n_effective_clusters"]),
             "min_cluster_size": int(best["min_cluster_size"]),
             "max_cluster_size": int(best["max_cluster_size"]),
@@ -448,7 +454,7 @@ def evaluate_age_group(
     (out_dir / f"{age_group}_gmm_summary.json").write_text(json.dumps(summary, indent=2))
     print(
         f"{age_group}: best subset={summary['best']['feature_subset']} "
-        f"k={summary['best']['k']} mean_rank={summary['best']['mean_rank']:.3f}"
+        f"k={summary['best']['k']} bic={summary['best']['bic']:.3f}"
     )
 
 
