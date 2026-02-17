@@ -1,0 +1,15 @@
+*   [33m329234c[m[33m ([m[1;35mrefs/stash[m[33m)[m On codex/create-a-new-branch: !!GitHub_Desktop<codex/create-a-new-branch>
+[31m|[m[32m\[m  
+[31m|[m * [33m7db3ed9[m index on codex/create-a-new-branch: 8a0524f Rework CCG numba backend while keeping ACG unchanged
+[31m|[m[31m/[m  
+* [33m8a0524f[m Rework CCG numba backend while keeping ACG unchanged
+[32m|[m *   [33m791d38b[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m)[m Merge pull request #2 from tadex909/codex-branch
+[32m|[m [33m|[m[34m\[m  
+[32m|[m [33m|[m * [33m6fe990d[m Add test.py
+[32m|[m [33m|[m[33m/[m  
+[32m|[m * [33m8f7059a[m Update .gitignore
+[32m|[m * [33m19cc496[m Things done
+[32m|[m[32m/[m  
+* [33m110420b[m Things done
+* [33m8c550f3[m Things done
+* [33m2e6a2b8[m Initial commit

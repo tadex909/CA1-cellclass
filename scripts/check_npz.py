@@ -34,6 +34,7 @@ def get_required_keys() -> Tuple[str, ...]:
         "allcel__itime_spk",
         "allcel__id_spk",
         "allcel__bestwaveform",
+        "allcel__type_u"
     )
 
 
