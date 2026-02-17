@@ -69,6 +69,21 @@ def safe_get(z: np.lib.npyio.NpzFile, key: str) -> np.ndarray:
     return z[key]
 
 
+def normalize_per_cell_field(arr: np.ndarray, n_cells: int, *, name: str) -> np.ndarray:
+    """
+    Ensure a per-cell field is 1D and aligned to cell_ids length.
+    """
+    out = np.asarray(arr)
+    out = np.squeeze(out)
+    if out.ndim != 1:
+        raise ValueError(f"{name} must be 1D after squeeze; got shape {arr.shape} -> {out.shape}")
+    if out.size != n_cells:
+        raise ValueError(f"{name} length mismatch: expected {n_cells}, got {out.size}")
+    if out.dtype.kind == "S":
+        out = np.char.decode(out, "utf-8", errors="ignore")
+    return out
+
+
 # -------------------------
 # Main extraction
 # -------------------------
@@ -100,10 +115,12 @@ def extract_one(
     spike_times_s = safe_get(z, "allcel__time_spk").astype(np.float64)      # seconds
     spike_cluster_ids = safe_get(z, "allcel__id_spk").astype(np.int64)      # cluster id per spike
     cell_ids = safe_get(z, "allcel__id_cel").astype(np.int64)              # list of cell cluster ids
+    type_u_raw = safe_get(z, "allcel__type_u")                               # previous classification per cell
 
     bestswaveforms = safe_get(z, "allcel__bestswaveforms").astype(np.float64)  # (51, 100, n_cells)
     # optional
     # bestwaveform = z.get("allcel__bestwaveform", None)
+    type_u = normalize_per_cell_field(type_u_raw, cell_ids.size, name="allcel__type_u")
 
     # -------------------------
     # Core per-cell counts
@@ -180,6 +197,7 @@ def extract_one(
         "date": session_meta["date"],
         "time": session_meta["time"],
         "cell_id": cell_ids,
+        "allcel__type_u": type_u,
 
         "n_spikes": n_spikes,
         "fr_hz": fr_hz,
