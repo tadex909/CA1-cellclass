@@ -16,6 +16,7 @@ DEFAULT_FEATURES = [
     "spk_asymmetry",
     "refractory_ms_center",
     "acg_peak_latency_ms",
+    "type_u"
 ]
 
 
