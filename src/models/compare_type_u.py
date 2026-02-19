@@ -7,6 +7,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+from sklearn.metrics import silhouette_samples
 
 from fitting import DEFAULT_AGE_GROUPS, DEFAULT_FEATURES, evaluate_gmm, prepare_matrix
 
@@ -40,6 +41,23 @@ def parse_csv_list(raw: str | None) -> list[str]:
     if not raw:
         return []
     return [x.strip() for x in raw.split(",") if x.strip()]
+
+
+def compute_silhouette_samples_safe(X: np.ndarray, labels: np.ndarray) -> np.ndarray:
+    """
+    Per-sample silhouette values, or NaN when undefined.
+    """
+    out = np.full(X.shape[0], np.nan, dtype=np.float64)
+    uniq = np.unique(labels)
+    if uniq.size < 2:
+        return out
+    if X.shape[0] <= uniq.size:
+        return out
+    try:
+        out = silhouette_samples(X, labels)
+    except Exception:
+        return out
+    return out
 
 
 def compare_one_age_group(
@@ -82,6 +100,7 @@ def compare_one_age_group(
     )
     labels = ev["labels"]
     proba = ev["proba"]
+    sil_samples = compute_silhouette_samples_safe(pack.X, labels)
 
     d = pack.df_valid.copy()
     d["type_u_binary"] = normalize_type_u(d["allcel__type_u"])
@@ -104,6 +123,7 @@ def compare_one_age_group(
     d["gmm_p_pyramidal"] = proba[:, pyramidal_cluster]
     d["gmm_pmax"] = proba.max(axis=1)
     d["gmm_margin"] = np.abs(proba[:, interneuron_cluster] - proba[:, pyramidal_cluster])
+    d["gmm_silhouette_sample"] = sil_samples
 
     d["pred_binary"] = np.where(labels == interneuron_cluster, 0, 1).astype("int64")
     d["pred_type"] = np.where(d["pred_binary"] == 0, "interneuron", "pyramidal")
@@ -122,7 +142,11 @@ def compare_one_age_group(
     n_cmp = int(valid_cmp.sum())
     n_match = int(((d["match"] == True) & valid_cmp).sum())
     rate = float(n_match / n_cmp) if n_cmp > 0 else float("nan")
-    print(f"{age_group}: compared={n_cmp}, match={n_match}, match_rate={rate:.3f}")
+    sil_mean = float(np.nanmean(d["gmm_silhouette_sample"])) if len(d) > 0 else float("nan")
+    print(
+        f"{age_group}: compared={n_cmp}, match={n_match}, "
+        f"match_rate={rate:.3f}, silhouette_mean={sil_mean:.3f}"
+    )
     return d
 
 
@@ -164,6 +188,19 @@ def build_summaries(df_all: pd.DataFrame, out_root: Path) -> None:
     ).reset_index(drop=True)
     by_session.to_csv(out_root / "discrepancies_by_session.csv", index=False)
 
+    by_cluster = (
+        d.groupby(["age_group", "gmm_cluster"], dropna=False)
+        .agg(
+            n_units=("gmm_cluster", "size"),
+            silhouette_mean=("gmm_silhouette_sample", "mean"),
+            silhouette_median=("gmm_silhouette_sample", "median"),
+            silhouette_min=("gmm_silhouette_sample", "min"),
+            silhouette_max=("gmm_silhouette_sample", "max"),
+        )
+        .reset_index()
+    )
+    by_cluster.to_csv(out_root / "silhouette_by_age_cluster.csv", index=False)
+
     discrepant_neurons = d_cmp[d_cmp["discrepancy"] == True].copy()
     discrepant_neurons = discrepant_neurons.sort_values(
         ["gmm_pmax", "gmm_margin"], ascending=[False, False]
@@ -194,6 +231,8 @@ def build_summaries(df_all: pd.DataFrame, out_root: Path) -> None:
     n_match = int((d_cmp["match"] == True).sum())
     n_discrepancy = int((d_cmp["discrepancy"] == True).sum())
     overall_match_rate = float(n_match / n_compared) if n_compared > 0 else float("nan")
+    overall_silhouette_mean = float(np.nanmean(d["gmm_silhouette_sample"]))
+    overall_silhouette_median = float(np.nanmedian(d["gmm_silhouette_sample"]))
 
     worst_age = (
         by_age.sort_values(["n_discrepancy", "discrepancy_rate"], ascending=[False, False])
@@ -209,11 +248,14 @@ def build_summaries(df_all: pd.DataFrame, out_root: Path) -> None:
         "n_match": n_match,
         "n_discrepancy": n_discrepancy,
         "overall_match_rate": overall_match_rate,
+        "overall_silhouette_mean": overall_silhouette_mean,
+        "overall_silhouette_median": overall_silhouette_median,
         "age_group_with_most_discrepancies": worst_age[0] if worst_age else None,
         "session_with_most_discrepancies": worst_session[0] if worst_session else None,
         "outputs": {
             "discrepancies_by_age_csv": str(out_root / "discrepancies_by_age.csv"),
             "discrepancies_by_session_csv": str(out_root / "discrepancies_by_session.csv"),
+            "silhouette_by_age_cluster_csv": str(out_root / "silhouette_by_age_cluster.csv"),
             "discrepant_neurons_parquet": str(out_root / "discrepant_neurons.parquet"),
             "discrepant_neurons_top500_csv": str(out_root / "discrepant_neurons_top500.csv"),
         },
@@ -292,4 +334,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
