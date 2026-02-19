@@ -154,3 +154,23 @@ Main outputs:
 - `results/type_u_comparison/discrepant_neurons_top500.csv`
 - per-age tables:
   - `results/type_u_comparison/<AGE>/<AGE>_gmm2_vs_type_u.parquet`
+
+## What Is `discrepant_neurons_top500.csv`?
+
+This file is produced by `compare_type_u.py`.
+
+- It contains neurons where the GMM class and `allcel__type_u` disagree.
+- It is **not** a run-to-run instability table (it is from the final selected fit for that run).
+
+Ranking logic in the file:
+
+1. `gmm_pmax` descending (highest assignment confidence first)
+2. `gmm_margin` descending (largest probability gap between classes first)
+
+Where:
+
+- `gmm_pmax = max(P(interneuron), P(pyramidal))`
+- `gmm_margin = |P(interneuron) - P(pyramidal)|`
+
+So top rows are high-confidence disagreements with `type_u`.
+For run-to-run instability, use outputs from `stability_analysis.py` (e.g. `top_uncertain_neurons.csv`).
