@@ -22,6 +22,11 @@ DEFAULT_FEATURES = [
 ]
 
 
+def normalize_session_name(value: object) -> str:
+    """Normalize session identifiers to make schedule matching robust."""
+    return " ".join(str(value).strip().split())
+
+
 def age_group_from_age(age: int) -> Optional[str]:
     if age in (15, 16):
         return "P15_16"
@@ -47,9 +52,10 @@ def load_session_metadata(excel_path: Path) -> pd.DataFrame:
 
     meta = meta.copy()
     meta["SessionName"] = meta["SessionName"].astype(str)
+    meta["session_key"] = meta["SessionName"].map(normalize_session_name)
     meta["Age"] = pd.to_numeric(meta["Age"], errors="coerce").astype("Int64")
     meta["age_group"] = meta["Age"].apply(lambda x: age_group_from_age(int(x)) if pd.notna(x) else None)
-    return meta[["SessionName", "Age", "age_group"]]
+    return meta[["SessionName", "session_key", "Age", "age_group"]]
 
 
 def iter_feature_parquets(processed_root: Path) -> List[Path]:
@@ -161,9 +167,10 @@ def main() -> None:
 
     meta = load_session_metadata(Path(args.excel))
     df = load_all_features(processed_root)
+    df["session_key"] = df["session_id"].map(normalize_session_name)
 
     # Merge session metadata
-    df = df.merge(meta, left_on="session_id", right_on="SessionName", how="left")
+    df = df.merge(meta, on="session_key", how="left")
     if args.drop_unmapped:
         df = df[df["age_group"].notna()].copy()
 
