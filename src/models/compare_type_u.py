@@ -223,6 +223,9 @@ def build_summaries(df_all: pd.DataFrame, out_root: Path) -> None:
     ]
     keep_cols = [c for c in keep_cols if c in discrepant_neurons.columns]
     discrepant_neurons[keep_cols].to_parquet(out_root / "discrepant_neurons.parquet", index=False)
+    discrepant_neurons[keep_cols].to_csv(
+        out_root / "discrepant_neurons_all.csv", index=False
+    )
     discrepant_neurons[keep_cols].head(500).to_csv(
         out_root / "discrepant_neurons_top500.csv", index=False
     )
@@ -257,6 +260,7 @@ def build_summaries(df_all: pd.DataFrame, out_root: Path) -> None:
             "discrepancies_by_session_csv": str(out_root / "discrepancies_by_session.csv"),
             "silhouette_by_age_cluster_csv": str(out_root / "silhouette_by_age_cluster.csv"),
             "discrepant_neurons_parquet": str(out_root / "discrepant_neurons.parquet"),
+            "discrepant_neurons_all_csv": str(out_root / "discrepant_neurons_all.csv"),
             "discrepant_neurons_top500_csv": str(out_root / "discrepant_neurons_top500.csv"),
         },
     }
