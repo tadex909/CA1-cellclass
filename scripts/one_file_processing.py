@@ -69,6 +69,13 @@ def safe_get(z: np.lib.npyio.NpzFile, key: str) -> np.ndarray:
     return z[key]
 
 
+def safe_get_any(z: np.lib.npyio.NpzFile, keys: list[str]) -> np.ndarray:
+    for key in keys:
+        if key in z:
+            return z[key]
+    raise KeyError(f"Missing keys {keys!r} in npz. Available keys: {list(z.keys())[:20]} ...")
+
+
 def normalize_per_cell_field(arr: np.ndarray, n_cells: int, *, name: str) -> np.ndarray:
     """
     Ensure a per-cell field is 1D and aligned to cell_ids length.
@@ -84,6 +91,53 @@ def normalize_per_cell_field(arr: np.ndarray, n_cells: int, *, name: str) -> np.
     return out
 
 
+def normalize_per_cell_matrix_field(arr: np.ndarray, n_cells: int, *, name: str) -> np.ndarray:
+    """
+    Ensure a per-cell matrix-like field is shaped as (n_cells, n_tasks).
+    Accepts (n_cells, n_tasks), (n_tasks, n_cells), or object-per-cell vectors.
+    """
+    out = np.asarray(arr)
+    out = np.squeeze(out)
+
+    if out.ndim == 1 and out.size == n_cells and out.dtype == object:
+        rows = [np.asarray(v).ravel() for v in out]
+        if not rows:
+            raise ValueError(f"{name} is empty")
+        max_tasks = max(r.size for r in rows)
+        if max_tasks == 0:
+            out = np.zeros((n_cells, 1), dtype=np.float64)
+        else:
+            out_pad = np.full((n_cells, max_tasks), np.nan, dtype=np.float64)
+            for i, r in enumerate(rows):
+                if r.size > 0:
+                    out_pad[i, : r.size] = r
+            out = out_pad
+    elif out.ndim == 1:
+        if out.size == n_cells:
+            out = out.reshape(n_cells, 1)
+        elif out.size % n_cells == 0:
+            out = out.reshape(n_cells, out.size // n_cells)
+        else:
+            raise ValueError(
+                f"{name} length mismatch: expected {n_cells} or a multiple, got {out.size}"
+            )
+    elif out.ndim == 2:
+        if out.shape[0] == n_cells:
+            pass
+        elif out.shape[1] == n_cells:
+            out = out.T
+        elif out.size % n_cells == 0:
+            out = out.reshape(n_cells, out.size // n_cells)
+        else:
+            raise ValueError(
+                f"{name} shape mismatch: expected one axis={n_cells}, got {out.shape}"
+            )
+    else:
+        raise ValueError(f"{name} must be <=2D after squeeze; got shape {arr.shape} -> {out.shape}")
+
+    return np.asarray(out, dtype=np.float64)
+
+
 # -------------------------
 # Main extraction
 # -------------------------
@@ -96,6 +150,9 @@ def extract_one(
     acg_bin_ms: float = 1.0,
     acg_window_ms: float = 50.0,
     acg_smooth_ms: float = 2.0,
+    theta_acg_bin_ms: float = 10.0,
+    theta_acg_window_ms: float = 700.0,
+    theta_acg_smooth_ms: float | None = None,
     # Waveform params
     waveform_fs_hz: float = 25000.0,
     waveform_trim: int = 5,
@@ -116,11 +173,43 @@ def extract_one(
     spike_cluster_ids = safe_get(z, "allcel__id_spk").astype(np.int64)      # cluster id per spike
     cell_ids = safe_get(z, "allcel__id_cel").astype(np.int64)              # list of cell cluster ids
     type_u_raw = safe_get(z, "allcel__type_u")                               # previous classification per cell
+    burst_u_raw = safe_get_any(z, ["allcel__burst_u", "burst_u"])
+    fr_u_raw = safe_get_any(z, ["allcel__fr_u", "fr_u"])
+    duration_u_raw = safe_get_any(z, ["allcel__duration_u", "duration_u"])
+    asymmetry_u_raw = safe_get_any(z, ["allcel__asymmetry_u", "asymmetry_u"])
+    pyr_sm_uc_raw = safe_get_any(z, ["allcel__pyr_sm_uc", "pyr_sm_uc"])
+    itn_sm_uc_raw = safe_get_any(z, ["allcel__itn_sm_uc", "itn_sm_uc"])
 
     bestswaveforms = safe_get(z, "allcel__bestswaveforms").astype(np.float64)  # (51, 100, n_cells)
     # optional
     # bestwaveform = z.get("allcel__bestwaveform", None)
     type_u = normalize_per_cell_field(type_u_raw, cell_ids.size, name="allcel__type_u")
+    burst_u = normalize_per_cell_field(burst_u_raw, cell_ids.size, name="allcel__burst_u").astype(np.float64)
+    fr_u = normalize_per_cell_field(fr_u_raw, cell_ids.size, name="allcel__fr_u").astype(np.float64)
+    duration_u = normalize_per_cell_field(duration_u_raw, cell_ids.size, name="allcel__duration_u").astype(np.float64)
+    asymmetry_u = normalize_per_cell_field(
+        asymmetry_u_raw,
+        cell_ids.size,
+        name="allcel__asymmetry_u",
+    ).astype(np.float64)
+    pyr_sm_uc = normalize_per_cell_matrix_field(pyr_sm_uc_raw, cell_ids.size, name="allcel__pyr_sm_uc")
+    itn_sm_uc = normalize_per_cell_matrix_field(itn_sm_uc_raw, cell_ids.size, name="allcel__itn_sm_uc")
+
+    n_tasks = int(max(pyr_sm_uc.shape[1], itn_sm_uc.shape[1]))
+
+    def _pad_tasks(arr: np.ndarray, n_cols: int) -> np.ndarray:
+        if arr.shape[1] == n_cols:
+            return arr
+        out = np.full((arr.shape[0], n_cols), np.nan, dtype=np.float64)
+        out[:, : arr.shape[1]] = arr
+        return out
+
+    pyr_sm_uc = _pad_tasks(pyr_sm_uc, n_tasks)
+    itn_sm_uc = _pad_tasks(itn_sm_uc, n_tasks)
+
+    type_u_num = pd.to_numeric(pd.Series(type_u), errors="coerce").to_numpy(dtype=np.float64)
+    sm_u = np.where(type_u_num.reshape(-1, 1) == 1.0, pyr_sm_uc, itn_sm_uc)
+    sm_u_any = np.nansum(sm_u > 0, axis=1) > 0
 
     # -------------------------
     # Core per-cell counts
@@ -138,7 +227,9 @@ def extract_one(
     else:
         duration_s = np.nan
 
-    fr_hz = n_spikes / duration_s
+    fr_hz_session = n_spikes / duration_s
+    # Use the dataset-provided firing rate for compatibility with legacy features.
+    fr_hz = fr_u
 
     # -------------------------
     # ACG (counts) + smoothing
@@ -155,6 +246,24 @@ def extract_one(
     acg_counts = acg_res.acg               # (n_lags, n_cells)
     lags_ms = acg_res.bin_centers_ms       # (n_lags,)
     acg_counts_smooth = smooth_acg_gaussian(acg_counts, sigma_ms= acg_smooth_ms, bin_ms=acg_bin_ms, axis=0) 
+
+    theta_sigma_ms = acg_smooth_ms if theta_acg_smooth_ms is None else theta_acg_smooth_ms
+    theta_acg_res = compute_acg(
+        spike_times_s=spike_times_s,
+        spike_cluster_ids=spike_cluster_ids,
+        cell_ids=cell_ids,
+        bin_ms=theta_acg_bin_ms,
+        window_ms=theta_acg_window_ms,
+        normalize="count",
+    )
+    theta_acg_counts = theta_acg_res.acg
+    theta_lags_ms = theta_acg_res.bin_centers_ms
+    theta_acg_counts_smooth = smooth_acg_gaussian(
+        theta_acg_counts,
+        sigma_ms=theta_sigma_ms,
+        bin_ms=theta_acg_bin_ms,
+        axis=0,
+    )
 
     # Refractory (Royer derivative method) — you can choose raw or smoothed
     refr = refractory_ms_derivative_sd(acg_counts, lags_ms)
@@ -198,9 +307,15 @@ def extract_one(
         "time": session_meta["time"],
         "cell_id": cell_ids,
         "allcel__type_u": type_u,
+        "allcel__burst_u": burst_u,
+        "allcel__fr_u": fr_u,
+        "allcel__duration_u": duration_u,
+        "allcel__asymmetry_u": asymmetry_u,
+        "allcel__sm_u_any": sm_u_any,
 
         "n_spikes": n_spikes,
         "fr_hz": fr_hz,
+        "fr_hz_session": fr_hz_session,
         "cv2": cv2,
 
         "refractory_ms_center": refr.refractory_ms_center,
@@ -223,6 +338,9 @@ def extract_one(
         "qc_waveform": qc_waveform,
     })
 
+    for k in range(sm_u.shape[1]):
+        df[f"allcel__sm_u_task{k+1}"] = sm_u[:, k]
+
     # -------------------------
     # Save outputs
     # -------------------------
@@ -230,6 +348,7 @@ def extract_one(
 
     features_path = dirs["features"] / f"{session_id}_features.parquet"
     acg_path = dirs["acg"] / f"{session_id}_acg_counts_bin{int(acg_bin_ms)}_win{int(acg_window_ms)}.npz"
+    theta_acg_path = dirs["acg"] / f"{session_id}_acg_counts_bin{int(theta_acg_bin_ms)}_win{int(theta_acg_window_ms)}.npz"
     manifest_path = dirs["qc"] / f"{session_id}_manifest.json"
 
     df.to_parquet(features_path, index=False)
@@ -244,6 +363,16 @@ def extract_one(
         acg_bin_ms=acg_bin_ms,
         acg_window_ms=acg_window_ms,
     )
+    np.savez_compressed(
+        theta_acg_path,
+        lags_ms=theta_lags_ms,
+        cell_ids=cell_ids,
+        acg_counts=theta_acg_counts,
+        acg_counts_smooth_boxcar_ms=theta_sigma_ms,
+        acg_counts_smooth=theta_acg_counts_smooth,
+        acg_bin_ms=theta_acg_bin_ms,
+        acg_window_ms=theta_acg_window_ms,
+    )
 
     manifest: Dict[str, Any] = {
         "created_at": datetime.now().isoformat(timespec="seconds"),
@@ -253,6 +382,9 @@ def extract_one(
             "acg_bin_ms": acg_bin_ms,
             "acg_window_ms": acg_window_ms,
             "acg_smooth_ms": acg_smooth_ms,
+            "theta_acg_bin_ms": theta_acg_bin_ms,
+            "theta_acg_window_ms": theta_acg_window_ms,
+            "theta_acg_smooth_ms": theta_sigma_ms,
             "waveform_fs_hz": waveform_fs_hz,
             "waveform_trim": waveform_trim,
             "qc_min_spikes": qc_min_spikes,
@@ -260,6 +392,7 @@ def extract_one(
         "outputs": {
             "features_parquet": str(features_path),
             "acg_npz": str(acg_path),
+            "theta_acg_npz": str(theta_acg_path),
         },
         "counts": {
             "n_cells": int(len(cell_ids)),
@@ -279,6 +412,9 @@ def main() -> None:
     ap.add_argument("--acg_bin_ms", type=float, default=1.0)
     ap.add_argument("--acg_window_ms", type=float, default=50.0)
     ap.add_argument("--acg_smooth_ms", type=float, default=2.0)
+    ap.add_argument("--theta_acg_bin_ms", type=float, default=10.0)
+    ap.add_argument("--theta_acg_window_ms", type=float, default=700.0)
+    ap.add_argument("--theta_acg_smooth_ms", type=float, default=None)
 
     ap.add_argument("--waveform_fs_hz", type=float, default=25000.0)
     ap.add_argument("--waveform_trim", type=int, default=5)
@@ -293,6 +429,9 @@ def main() -> None:
         acg_bin_ms=args.acg_bin_ms,
         acg_window_ms=args.acg_window_ms,
         acg_smooth_ms=args.acg_smooth_ms,
+        theta_acg_bin_ms=args.theta_acg_bin_ms,
+        theta_acg_window_ms=args.theta_acg_window_ms,
+        theta_acg_smooth_ms=args.theta_acg_smooth_ms,
         waveform_fs_hz=args.waveform_fs_hz,
         waveform_trim=args.waveform_trim,
         qc_min_spikes=args.qc_min_spikes,

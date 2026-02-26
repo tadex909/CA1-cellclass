@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-Convert MATLAB *_Ratemap*.mat files to compressed NPZ files containing the `allcel` struct.
+Convert MATLAB *_Ratemap*.mat files to compressed NPZ files containing `allcel`
+and selected fields from `allpf`.
 
 Typical input filename:
   VS57_2022-12-18_18-51-04_Ratemap_final_thèse.mat
@@ -11,6 +12,7 @@ Output:
 The NPZ contains:
   - meta (JSON string): mouse, date, time, session_name, source_path, source_mtime, etc.
   - allcel__<field> arrays for each numeric field in allcel (Spikes excluded by default)
+  - allpf__ispf_cxu when available
 """
 
 from __future__ import annotations
@@ -140,6 +142,16 @@ def extract_allcel(mat_dict: Dict[str, Any]) -> Dict[str, Any]:
     raise KeyError(f"Could not find 'allcel' (or 'allcell') in MAT file. Top-level keys: {keys}")
 
 
+def extract_optional_struct(mat_dict: Dict[str, Any], names: tuple[str, ...]) -> Dict[str, Any] | None:
+    """
+    Extract a top-level MATLAB struct if present.
+    """
+    for n in names:
+        if n in mat_dict and isinstance(mat_dict[n], dict):
+            return mat_dict[n]
+    return None
+
+
 # Better: just treat any field starting with id_ or containing "channel" as int-ish if it looks integer
 def maybe_cast_int(name: str, arr: Any) -> Any:
     if not isinstance(arr, np.ndarray):
@@ -179,6 +191,7 @@ def convert_one(mat_path: Path, out_root: Path, overwrite: bool, include_spikes:
 
     md = load_mat_file(mat_path)
     allcel = extract_allcel(md)
+    allpf = extract_optional_struct(md, ("allpf",))
 
     # Build NPZ payload
     payload: Dict[str, Any] = {}
@@ -192,6 +205,7 @@ def convert_one(mat_path: Path, out_root: Path, overwrite: bool, include_spikes:
         "source_mtime": mat_path.stat().st_mtime,
         "mat_keys": sorted(md.keys()),
         "allcel_fields": sorted(allcel.keys()) if isinstance(allcel, dict) else None,
+        "allpf_fields": sorted(allpf.keys()) if isinstance(allpf, dict) else None,
         "include_spikes": include_spikes,
     }
     payload["meta_json"] = np.array(json.dumps(meta), dtype=np.string_)
@@ -213,6 +227,15 @@ def convert_one(mat_path: Path, out_root: Path, overwrite: bool, include_spikes:
         else:
             # store scalars / strings as JSON-safe
             payload[f"allcel__{k}__json"] = np.array(json.dumps(v, default=str), dtype=np.string_)
+
+    # Export selected allpf fields needed downstream (spatial modulation flags).
+    if isinstance(allpf, dict):
+        if "ispf_cxu" in allpf:
+            v = allpf["ispf_cxu"]
+            if isinstance(v, np.ndarray):
+                payload["allpf__ispf_cxu"] = maybe_cast_int("ispf_cxu", v)
+            else:
+                payload["allpf__ispf_cxu__json"] = np.array(json.dumps(v, default=str), dtype=np.string_)
 
     np.savez_compressed(out_path, **payload)
     return out_path

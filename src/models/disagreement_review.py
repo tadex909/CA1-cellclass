@@ -76,6 +76,57 @@ def extract_typical_waveform(
     return t_ms, wf
 
 
+def acg_paths_for_session(processed_root: Path, session_id: str) -> tuple[Path, Path]:
+    mouse = session_id.split("_")[0] if "_" in session_id else session_id
+    acg_dir = processed_root / mouse / "acg"
+    short_path = acg_dir / f"{session_id}_acg_counts_bin1_win50.npz"
+    theta_path = acg_dir / f"{session_id}_acg_counts_bin10_win700.npz"
+    return short_path, theta_path
+
+
+@lru_cache(maxsize=4096)
+def load_acg_cell_curve(acg_npz_path: str, cell_id: int) -> Optional[tuple[np.ndarray, np.ndarray, float]]:
+    p = Path(acg_npz_path)
+    if not p.exists():
+        return None
+    try:
+        with np.load(p, allow_pickle=False) as z:
+            lags_ms = np.asarray(z["lags_ms"]).astype(np.float64).ravel()
+            cell_ids = np.asarray(z["cell_ids"]).astype(np.int64).ravel()
+            acg = np.asarray(z["acg_counts"]).astype(np.float64)
+            bin_ms = float(np.asarray(z["acg_bin_ms"]).reshape(-1)[0]) if "acg_bin_ms" in z else np.nan
+    except Exception:
+        return None
+
+    if acg.ndim != 2 or lags_ms.size != acg.shape[0]:
+        return None
+
+    idx = np.where(cell_ids == int(cell_id))[0]
+    if idx.size == 0:
+        return None
+
+    y = np.asarray(acg[:, int(idx[0])], dtype=np.float64).ravel()
+    if not np.isfinite(bin_ms) or bin_ms <= 0:
+        if lags_ms.size > 1:
+            bin_ms = float(np.median(np.diff(lags_ms)))
+        else:
+            bin_ms = 1.0
+    return lags_ms, y, float(bin_ms)
+
+
+def smooth_gaussian_1d(y: np.ndarray, sigma_ms: float, bin_ms: float) -> np.ndarray:
+    if sigma_ms <= 0 or bin_ms <= 0:
+        return np.asarray(y, dtype=np.float64)
+    sigma_bins = float(sigma_ms) / float(bin_ms)
+    if sigma_bins < 1e-6:
+        return np.asarray(y, dtype=np.float64)
+    radius = max(1, int(np.ceil(4.0 * sigma_bins)))
+    x = np.arange(-radius, radius + 1, dtype=np.float64)
+    kernel = np.exp(-(x**2) / (2.0 * sigma_bins**2))
+    kernel /= np.sum(kernel)
+    return np.convolve(np.asarray(y, dtype=np.float64), kernel, mode="same")
+
+
 def build_population_cache(comparison_root: Path) -> dict[str, pd.DataFrame]:
     out: dict[str, pd.DataFrame] = {}
     for age_dir in sorted([p for p in comparison_root.iterdir() if p.is_dir()]):
@@ -119,10 +170,13 @@ def main() -> None:
     )
     ap.add_argument("--comparison_root", type=str, default="results/type_u_comparison")
     ap.add_argument("--interim_root", type=str, default="data/interim")
+    ap.add_argument("--processed_root", type=str, default="data/processed")
     ap.add_argument("--out_root", type=str, default="results/type_u_comparison/review")
     ap.add_argument("--ages", type=str, default="")
     ap.add_argument("--top_n", type=int, default=0, help="0 means all discrepant neurons")
     ap.add_argument("--waveform_fs_hz", type=float, default=25000.0)
+    ap.add_argument("--short_acg_smooth_ms", type=float, default=2.0)
+    ap.add_argument("--theta_acg_smooth_ms", type=float, default=20.0)
     args = ap.parse_args()
 
     comparison_root = Path(args.comparison_root)
@@ -162,10 +216,16 @@ def main() -> None:
         if npz_path is not None:
             wf = extract_typical_waveform(npz_path, cell_id, args.waveform_fs_hz)
 
-        fig, axes = plt.subplots(1, 2, figsize=(10, 4))
+        short_acg_path, theta_acg_path = acg_paths_for_session(
+            Path(args.processed_root), session_id
+        )
+        short_acg = load_acg_cell_curve(str(short_acg_path), cell_id)
+        theta_acg = load_acg_cell_curve(str(theta_acg_path), cell_id)
 
-        # Left: waveform
-        ax0 = axes[0]
+        fig, axes = plt.subplots(2, 2, figsize=(12, 8))
+        ax0, ax1, ax2, ax3 = axes.flatten()
+
+        # Top-left: waveform
         if wf is None:
             ax0.text(0.5, 0.5, "Waveform not found", ha="center", va="center")
             ax0.set_axis_off()
@@ -176,8 +236,7 @@ def main() -> None:
             ax0.set_ylabel("amplitude (a.u.)")
             ax0.set_title("Typical waveform")
 
-        # Right: FR vs duration context
-        ax1 = axes[1]
+        # Top-right: FR vs duration context
         pop = pop_by_age.get(age)
         if pop is not None and {"spk_duration_ms", "fr_hz"}.issubset(pop.columns):
             ax1.scatter(
@@ -205,6 +264,30 @@ def main() -> None:
         ax1.set_ylabel("fr_hz")
         ax1.set_title("Feature context")
         ax1.legend(frameon=False, fontsize=8)
+
+        # Bottom-left: short-lag ACG
+        if short_acg is None:
+            ax2.text(0.5, 0.5, "ACG bin1/win50 not found", ha="center", va="center")
+            ax2.set_axis_off()
+        else:
+            lags_ms, y_raw, bin_ms = short_acg
+            y = smooth_gaussian_1d(y_raw, args.short_acg_smooth_ms, bin_ms)
+            ax2.bar(lags_ms, y, width=0.9 * bin_ms, align="center", color="tab:blue", alpha=0.9)
+            ax2.set_xlabel("lag (ms)")
+            ax2.set_ylabel("count (smoothed)")
+            ax2.set_title(f"ACG 1 ms / 50 ms (gauss {args.short_acg_smooth_ms:g} ms)")
+
+        # Bottom-right: theta-lag ACG
+        if theta_acg is None:
+            ax3.text(0.5, 0.5, "ACG bin10/win700 not found", ha="center", va="center")
+            ax3.set_axis_off()
+        else:
+            lags_ms, y_raw, bin_ms = theta_acg
+            y = smooth_gaussian_1d(y_raw, args.theta_acg_smooth_ms, bin_ms)
+            ax3.bar(lags_ms, y, width=0.9 * bin_ms, align="center", color="tab:green", alpha=0.9)
+            ax3.set_xlabel("lag (ms)")
+            ax3.set_ylabel("count (smoothed)")
+            ax3.set_title(f"ACG 10 ms / 700 ms (gauss {args.theta_acg_smooth_ms:g} ms)")
 
         fig.suptitle(
             f"{unit_uid} | type_u={row.get('type_u_type','?')} | pred={row.get('pred_type','?')}",
@@ -234,6 +317,10 @@ def main() -> None:
                 "burst_index": row.get("burst_index", pd.NA),
                 "interim_npz_found": bool(npz_path is not None),
                 "interim_npz_path": str(npz_path) if npz_path is not None else "",
+                "short_acg_npz_found": bool(short_acg_path.exists()),
+                "short_acg_npz_path": str(short_acg_path),
+                "theta_acg_npz_found": bool(theta_acg_path.exists()),
+                "theta_acg_npz_path": str(theta_acg_path),
                 "review_plot_png": str(plot_path),
             }
         )

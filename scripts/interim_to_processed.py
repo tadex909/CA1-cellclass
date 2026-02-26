@@ -32,8 +32,9 @@ def outputs_exist(npz_path: Path, processed_root: Path) -> bool:
     mouse = meta["mouse"]
     feat = processed_root / mouse / "features" / f"{session_id}_features.parquet"
     acg = processed_root / mouse / "acg" / f"{session_id}_acg_counts_bin1_win50.npz"
+    theta_acg = processed_root / mouse / "acg" / f"{session_id}_acg_counts_bin10_win700.npz"
     qc  = processed_root / mouse / "qc" / f"{session_id}_manifest.json"
-    return feat.exists() and acg.exists() and qc.exists()
+    return feat.exists() and acg.exists() and theta_acg.exists() and qc.exists()
 
 
 def main():
@@ -46,6 +47,9 @@ def main():
     ap.add_argument("--acg_bin_ms", type=float, default=1.0)
     ap.add_argument("--acg_window_ms", type=float, default=50.0)
     ap.add_argument("--acg_smooth_ms", type=float, default=2.0)
+    ap.add_argument("--theta_acg_bin_ms", type=float, default=10.0)
+    ap.add_argument("--theta_acg_window_ms", type=float, default=700.0)
+    ap.add_argument("--theta_acg_smooth_ms", type=float, default=None)
     ap.add_argument("--waveform_fs_hz", type=float, default=25000.0)
     ap.add_argument("--waveform_trim", type=int, default=5)
     ap.add_argument("--qc_min_spikes", type=int, default=200)
@@ -81,6 +85,9 @@ def main():
                 acg_bin_ms=args.acg_bin_ms,
                 acg_window_ms=args.acg_window_ms,
                 acg_smooth_ms=args.acg_smooth_ms,
+                theta_acg_bin_ms=args.theta_acg_bin_ms,
+                theta_acg_window_ms=args.theta_acg_window_ms,
+                theta_acg_smooth_ms=args.theta_acg_smooth_ms,
                 waveform_fs_hz=args.waveform_fs_hz,
                 waveform_trim=args.waveform_trim,
                 qc_min_spikes=args.qc_min_spikes,
