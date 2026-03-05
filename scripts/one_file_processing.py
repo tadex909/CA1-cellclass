@@ -138,6 +138,102 @@ def normalize_per_cell_matrix_field(arr: np.ndarray, n_cells: int, *, name: str)
     return np.asarray(out, dtype=np.float64)
 
 
+def normalize_ispf_cxu(
+    arr: np.ndarray,
+    n_cells: int,
+    *,
+    n_condition_pairs: int = 5,
+) -> np.ndarray:
+    """
+    Normalize allpf.ispf_cxu to shape (2*n_condition_pairs, n_spatial_bins, n_cells).
+    """
+    out = np.asarray(arr)
+    out = np.squeeze(out)
+    expected_cond = 2 * n_condition_pairs
+
+    if out.ndim == 2:
+        if n_cells != 1:
+            raise ValueError(
+                f"allpf__ispf_cxu is 2D but n_cells={n_cells}; expected 3D with cell axis."
+            )
+        if out.shape[0] == expected_cond:
+            out = out[:, :, np.newaxis]
+        elif out.shape[1] == expected_cond:
+            out = out.T[:, :, np.newaxis]
+        else:
+            raise ValueError(
+                f"Could not infer condition axis in 2D allpf__ispf_cxu shape {out.shape}."
+            )
+    elif out.ndim != 3:
+        raise ValueError(f"allpf__ispf_cxu must be 2D/3D after squeeze; got {out.shape}")
+
+    # Put cell axis last.
+    if out.shape[2] == n_cells:
+        pass
+    elif out.shape[0] == n_cells:
+        out = np.moveaxis(out, 0, 2)
+    elif out.shape[1] == n_cells:
+        out = np.moveaxis(out, 1, 2)
+    else:
+        raise ValueError(
+            f"Could not align allpf__ispf_cxu cell axis with n_cells={n_cells}; got {out.shape}."
+        )
+
+    # Put condition axis first.
+    if out.shape[0] == expected_cond:
+        pass
+    elif out.shape[1] == expected_cond:
+        out = np.swapaxes(out, 0, 1)
+    else:
+        raise ValueError(
+            f"Could not align allpf__ispf_cxu condition axis with expected {expected_cond}; got {out.shape}."
+        )
+
+    return np.asarray(out, dtype=np.float64)
+
+
+def spatial_modulation_from_ispf(
+    ispf_cxu: np.ndarray,
+    *,
+    n_condition_pairs: int = 5,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Derive spatial modulation summaries from ispf_cxu.
+
+    Returns
+    -------
+    sm_any : (n_cells,) bool
+        True if neuron has at least one PF bin in any condition/direction.
+    sm_task_any : (n_cells, n_condition_pairs) bool
+        True if neuron has PF in either direction of the paired condition.
+    sm_task_dir : (n_cells, n_condition_pairs) str
+        'none' | 'uni' | 'bi' for each experimental condition pair.
+    """
+    n_cond_expected = 2 * n_condition_pairs
+    if ispf_cxu.shape[0] != n_cond_expected:
+        raise ValueError(
+            f"ispf_cxu first axis must be {n_cond_expected}, got {ispf_cxu.shape[0]}"
+        )
+
+    # cond_has_pf: (n_cond, n_cells)
+    cond_has_pf = np.any(ispf_cxu > 0, axis=1)
+    n_cells = cond_has_pf.shape[1]
+    sm_any = np.any(cond_has_pf, axis=0)
+
+    sm_task_any = np.zeros((n_cells, n_condition_pairs), dtype=bool)
+    sm_task_dir = np.full((n_cells, n_condition_pairs), "none", dtype=object)
+
+    for c in range(n_condition_pairs):
+        a = cond_has_pf[2 * c, :]
+        b = cond_has_pf[2 * c + 1, :]
+        bi = a & b
+        uni = a ^ b
+        sm_task_any[:, c] = a | b
+        sm_task_dir[:, c] = np.where(bi, "bi", np.where(uni, "uni", "none"))
+
+    return sm_any, sm_task_any, sm_task_dir
+
+
 # -------------------------
 # Main extraction
 # -------------------------
@@ -177,8 +273,7 @@ def extract_one(
     fr_u_raw = safe_get_any(z, ["allcel__fr_u", "fr_u"])
     duration_u_raw = safe_get_any(z, ["allcel__duration_u", "duration_u"])
     asymmetry_u_raw = safe_get_any(z, ["allcel__asymmetry_u", "asymmetry_u"])
-    pyr_sm_uc_raw = safe_get_any(z, ["allcel__pyr_sm_uc", "pyr_sm_uc"])
-    itn_sm_uc_raw = safe_get_any(z, ["allcel__itn_sm_uc", "itn_sm_uc"])
+    ispf_cxu_raw = safe_get(z, "allpf__ispf_cxu")
 
     bestswaveforms = safe_get(z, "allcel__bestswaveforms").astype(np.float64)  # (51, 100, n_cells)
     # optional
@@ -192,24 +287,11 @@ def extract_one(
         cell_ids.size,
         name="allcel__asymmetry_u",
     ).astype(np.float64)
-    pyr_sm_uc = normalize_per_cell_matrix_field(pyr_sm_uc_raw, cell_ids.size, name="allcel__pyr_sm_uc")
-    itn_sm_uc = normalize_per_cell_matrix_field(itn_sm_uc_raw, cell_ids.size, name="allcel__itn_sm_uc")
-
-    n_tasks = int(max(pyr_sm_uc.shape[1], itn_sm_uc.shape[1]))
-
-    def _pad_tasks(arr: np.ndarray, n_cols: int) -> np.ndarray:
-        if arr.shape[1] == n_cols:
-            return arr
-        out = np.full((arr.shape[0], n_cols), np.nan, dtype=np.float64)
-        out[:, : arr.shape[1]] = arr
-        return out
-
-    pyr_sm_uc = _pad_tasks(pyr_sm_uc, n_tasks)
-    itn_sm_uc = _pad_tasks(itn_sm_uc, n_tasks)
-
-    type_u_num = pd.to_numeric(pd.Series(type_u), errors="coerce").to_numpy(dtype=np.float64)
-    sm_u = np.where(type_u_num.reshape(-1, 1) == 1.0, pyr_sm_uc, itn_sm_uc)
-    sm_u_any = np.nansum(sm_u > 0, axis=1) > 0
+    ispf_cxu = normalize_ispf_cxu(ispf_cxu_raw, cell_ids.size, n_condition_pairs=5)
+    sm_u_any, sm_u_task_any, sm_u_task_dir = spatial_modulation_from_ispf(
+        ispf_cxu,
+        n_condition_pairs=5,
+    )
 
     # -------------------------
     # Core per-cell counts
@@ -338,8 +420,9 @@ def extract_one(
         "qc_waveform": qc_waveform,
     })
 
-    for k in range(sm_u.shape[1]):
-        df[f"allcel__sm_u_task{k+1}"] = sm_u[:, k]
+    for k in range(sm_u_task_any.shape[1]):
+        df[f"allcel__sm_u_task{k+1}"] = sm_u_task_any[:, k]
+        df[f"allcel__sm_u_task{k+1}_dir"] = pd.Series(sm_u_task_dir[:, k], dtype="string")
 
     # -------------------------
     # Save outputs

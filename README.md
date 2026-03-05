@@ -6,6 +6,7 @@ This repository has two main layers:
 
 1. `src/cellclass`: data processing and feature extraction from raw/interim files.
 2. `src/models`: unsupervised modeling, model-selection, stability analysis, and comparison with external labels.
+3. `src/placefields`: place-field analysis scaffold (occupancy/rate maps, spatial information, field detection).
 
 ---
 
@@ -20,6 +21,8 @@ This repository has two main layers:
     - `fitting.py`: systematic GMM model selection (`k`, feature subsets).
     - `compare_type_u.py`: fixed `k=2` clustering vs `allcel__type_u`.
     - `stability_analysis.py`: per-age-group robustness analysis across seeds/subsets.
+- `src/placefields/`
+  - Place-field analysis utilities and session-level scaffold pipeline.
 - `data/`
   - Raw/interim/processed data.
 - `results/`

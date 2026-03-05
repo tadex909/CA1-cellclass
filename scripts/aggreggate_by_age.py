@@ -18,7 +18,12 @@ DEFAULT_FEATURES = [
     "spk_asymmetry",
     "refractory_ms_edge",
     "acg_peak_latency_ms",
-    "type_u"
+    "allcel__sm_u_any",
+    "allcel__sm_u_task1",
+    "allcel__sm_u_task2",
+    "allcel__sm_u_task3",
+    "allcel__sm_u_task4",
+    "allcel__sm_u_task5",
 ]
 
 
@@ -27,20 +32,30 @@ def normalize_session_name(value: object) -> str:
     return " ".join(str(value).strip().split())
 
 
+# def age_group_from_age(age: int) -> Optional[str]:
+#     if age in (15, 16):
+#         return "P15_16"
+#     if age in (17, 18):
+#         return "P17_18"
+#     if age in (19, 20):
+#         return "P19_20"
+#     if age in (21, 22):
+#         return "P21_22"
+#     if age in (23, 24):
+#         return "P23_24"
+#     if age == 25:
+#         return "P25"
+#     return None
+
 def age_group_from_age(age: int) -> Optional[str]:
-    if age in (15, 16):
-        return "P15_16"
-    if age in (17, 18):
-        return "P17_18"
-    if age in (19, 20):
-        return "P19_20"
-    if age in (21, 22):
-        return "P21_22"
-    if age in (23, 24):
-        return "P23_24"
-    if age == 25:
-        return "P25"
+    if age in (16, 17, 18):
+        return "P16-18"
+    if age in (19, 20, 21):
+        return "P19-21"
+    if age in (22, 23, 24):
+        return "P22-24"
     return None
+
 
 
 def load_session_metadata(excel_path: Path) -> pd.DataFrame:
@@ -179,7 +194,8 @@ def main() -> None:
     print(f"Loaded {len(df)} units total; mapped to age groups: {n_mapped}")
 
     # Only write supported age groups
-    groups = ["P15_16", "P17_18", "P19_20", "P21_22", "P23_24", "P25"]
+    # groups = ["P15_16", "P17_18", "P19_20", "P21_22", "P23_24", "P25"]
+    groups = ["P16-18", "P19-21", "P22-24"]
     feature_cols = [s.strip() for s in args.features.split(",") if s.strip()]
 
     for g in groups:

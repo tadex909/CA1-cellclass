@@ -17,7 +17,8 @@ from sklearn.metrics import (
 from sklearn.mixture import GaussianMixture
 
 
-DEFAULT_AGE_GROUPS = ["P15_16", "P17_18", "P19_20", "P21_22", "P23_24", "P25"]
+#DEFAULT_AGE_GROUPS = ["P15_16", "P17_18", "P19_20", "P21_22", "P23_24", "P25"]
+DEFAULT_AGE_GROUPS = ["P16-18", "P19-21", "P22-24"]
 DEFAULT_FEATURES = [
     "fr_hz",
     "burst_index",
@@ -80,12 +81,32 @@ def prepare_matrix(
     d = df.copy()
     used_cols: list[str] = []
 
+    def _append_used(col_name: str) -> None:
+        if col_name not in used_cols:
+            used_cols.append(col_name)
+
     for col in feature_cols:
+        # Explicit log-feature aliases accepted from CLI/config.
+        if col in {"log_fr_hz", "log10_fr_hz"}:
+            if "fr_hz" in d.columns:
+                d["log10_fr_hz"] = np.log10(d["fr_hz"].clip(lower=1e-6))
+                _append_used("log10_fr_hz")
+            continue
+        if col in {"log_fr_hz_session", "log10_fr_hz_session"}:
+            if "fr_hz_session" in d.columns:
+                d["log10_fr_hz_session"] = np.log10(d["fr_hz_session"].clip(lower=1e-6))
+                _append_used("log10_fr_hz_session")
+            continue
+
+        # Backward-compatible automatic log transform for selected FR columns.
         if col == "fr_hz" and log_fr:
             d["log10_fr_hz"] = np.log10(d["fr_hz"].clip(lower=1e-6))
-            used_cols.append("log10_fr_hz")
+            _append_used("log10_fr_hz")
+        elif col == "fr_hz_session" and log_fr:
+            d["log10_fr_hz_session"] = np.log10(d["fr_hz_session"].clip(lower=1e-6))
+            _append_used("log10_fr_hz_session")
         elif col in d.columns:
-            used_cols.append(col)
+            _append_used(col)
 
     if not used_cols:
         raise ValueError("No usable feature columns found in dataframe.")

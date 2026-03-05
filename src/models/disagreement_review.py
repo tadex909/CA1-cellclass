@@ -162,6 +162,31 @@ def get_neuron_xy(
     return float(m.iloc[0]["spk_duration_ms"]), float(m.iloc[0]["fr_hz"])
 
 
+def get_neuron_sm_status(pop: Optional[pd.DataFrame], row: pd.Series) -> Optional[bool]:
+    """
+    Return spatial modulation status for the highlighted neuron.
+    Prefer explicit values in row, fallback to lookup in population table.
+    """
+    v = row.get("allcel__sm_u_any", pd.NA)
+    if pd.notna(v):
+        return bool(v)
+
+    if pop is None or "allcel__sm_u_any" not in pop.columns:
+        return None
+
+    m = pop[
+        (pop["session_id"].astype(str) == str(row["session_id"]))
+        & (pop["cell_id"].astype(int) == int(row["cell_id"]))
+    ]
+    if m.empty:
+        return None
+
+    v2 = m.iloc[0].get("allcel__sm_u_any", pd.NA)
+    if pd.isna(v2):
+        return None
+    return bool(v2)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(
         description=(
@@ -248,6 +273,9 @@ def main() -> None:
                 zorder=1,
             )
         x_hi, y_hi = get_neuron_xy(pop, row)
+        sm_status = get_neuron_sm_status(pop, row)
+        sm_label = "SM" if sm_status is True else ("non-SM" if sm_status is False else "SM unknown")
+        hi_marker = "^" if sm_status is True else "o"
         ax1.scatter(
             [x_hi],
             [y_hi],
@@ -256,9 +284,9 @@ def main() -> None:
             color="red",
             edgecolors="black",
             linewidths=0.7,
-            marker="o",
+            marker=hi_marker,
             zorder=5,
-            label="discrepant neuron",
+            label=f"discrepant neuron ({sm_label})",
         )
         ax1.set_xlabel("spk_duration_ms")
         ax1.set_ylabel("fr_hz")
@@ -290,7 +318,7 @@ def main() -> None:
             ax3.set_title(f"ACG 10 ms / 700 ms (gauss {args.theta_acg_smooth_ms:g} ms)")
 
         fig.suptitle(
-            f"{unit_uid} | type_u={row.get('type_u_type','?')} | pred={row.get('pred_type','?')}",
+            f"{unit_uid} | type_u={row.get('type_u_type','?')} | pred={row.get('pred_type','?')} | {sm_label}",
             fontsize=10,
         )
         fig.tight_layout()
@@ -315,6 +343,7 @@ def main() -> None:
                 "spk_asymmetry": row.get("spk_asymmetry", pd.NA),
                 "cv2": row.get("cv2", pd.NA),
                 "burst_index": row.get("burst_index", pd.NA),
+                "allcel__sm_u_any": sm_status if sm_status is not None else pd.NA,
                 "interim_npz_found": bool(npz_path is not None),
                 "interim_npz_path": str(npz_path) if npz_path is not None else "",
                 "short_acg_npz_found": bool(short_acg_path.exists()),
