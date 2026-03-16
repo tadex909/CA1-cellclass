@@ -1,18 +1,10 @@
 #!/usr/bin/env python3
 """
-Convert MATLAB *_Ratemap*.mat files to compressed NPZ files containing `allcel`
-and selected fields from `allpf`.
+Convert MATLAB files to compressed NPZ files.
 
-Typical input filename:
-  VS57_2022-12-18_18-51-04_Ratemap_final_thèse.mat
-
-Output:
-  data/interim/VS57/2022-12-18/VS57_2022-12-18_18-51-04_allcel.npz
-
-The NPZ contains:
-  - meta (JSON string): mouse, date, time, session_name, source_path, source_mtime, etc.
-  - allcel__<field> arrays for each numeric field in allcel (Spikes excluded by default)
-  - allpf__ispf_cxu when available
+Supported modes:
+1) ratemap  -> expects *_Ratemap*.mat and exports `allcel` (+ selected `allpf`).
+2) trajdata -> expects *_TrajData*.mat and exports only `Traj` fields.
 """
 
 from __future__ import annotations
@@ -22,9 +14,27 @@ import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, Tuple
+from typing import Any, Dict, Iterable
 
 import numpy as np
+
+DEFAULT_TRAJ_FIELDS = [
+    "Cond",
+    "time",
+    "Wheel",
+    "VRtraj",
+    "condition",
+    "Speed",
+    "XSpeed",
+    "binSpX",
+    "BinSpW",
+    "WB",
+    "start",
+    "stop",
+    "tstart",
+    "tstop",
+    "endVR",
+]
 
 
 # -------------------------
@@ -40,7 +50,6 @@ class SessionInfo:
 
     @property
     def session_name(self) -> str:
-        # Keep what MATLAB uses a lot: MOUSE_DATE_TIME
         if self.time:
             return f"{self.mouse}_{self.date}_{self.time}"
         return f"{self.mouse}_{self.date}"
@@ -55,7 +64,6 @@ def parse_session_info(mat_path: Path) -> SessionInfo:
     stem = mat_path.stem
     m = FILENAME_RE.match(stem)
     if not m:
-        # fallback: take first token as mouse, and try to find date/time anywhere
         parts = stem.split("_")
         mouse = parts[0] if parts else "UNKNOWN"
         date = next((p for p in parts if re.fullmatch(r"\d{4}-\d{2}-\d{2}", p)), "UNKNOWNDATE")
@@ -65,12 +73,17 @@ def parse_session_info(mat_path: Path) -> SessionInfo:
 
 
 def safe_filename(s: str) -> str:
-    # Keep letters/numbers/_/-
     s = s.strip()
     s = re.sub(r"\s+", "_", s)
     s = re.sub(r"[^A-Za-z0-9_\-]+", "-", s)
     s = re.sub(r"-{2,}", "-", s).strip("-")
     return s
+
+
+def parse_csv_list(raw: str | None) -> list[str]:
+    if not raw:
+        return []
+    return [x.strip() for x in raw.split(",") if x.strip()]
 
 
 # -------------------------
@@ -87,33 +100,27 @@ def load_mat_file(mat_path: Path) -> Dict[str, Any]:
         from scipy.io.matlab import mat_struct  # type: ignore
 
         md = loadmat(mat_path, squeeze_me=True, struct_as_record=False)
-        # Remove scipy metadata keys
         md = {k: v for k, v in md.items() if not k.startswith("__")}
 
-        # Convert mat_struct recursively
         def _convert(x: Any) -> Any:
             if isinstance(x, mat_struct):
                 return {fn: _convert(getattr(x, fn)) for fn in x._fieldnames}
             if isinstance(x, np.ndarray) and x.dtype == object:
-                # convert each element
                 return np.array([_convert(e) for e in x.ravel()], dtype=object).reshape(x.shape)
             return x
 
         return {k: _convert(v) for k, v in md.items()}
 
     except NotImplementedError:
-        # Likely v7.3
         pass
     except Exception as e:
-        # Could still be v7.3 or corrupted
-        # We'll try v7.3 loader next, otherwise re-raise
         last_err = e
     else:
         last_err = None  # type: ignore
 
-    # Try mat73 (optional dependency)
     try:
         import mat73  # type: ignore
+
         md = mat73.loadmat(str(mat_path))
         return md
     except Exception:
@@ -129,36 +136,33 @@ def load_mat_file(mat_path: Path) -> Dict[str, Any]:
 
 
 def extract_allcel(mat_dict: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Extract allcel/allcell struct as a plain dict.
-    """
     if "allcel" in mat_dict and isinstance(mat_dict["allcel"], dict):
         return mat_dict["allcel"]
     if "allcell" in mat_dict and isinstance(mat_dict["allcell"], dict):
         return mat_dict["allcell"]
-
-    # Some files might store it nested (rare); provide helpful message
     keys = ", ".join(sorted(mat_dict.keys()))
     raise KeyError(f"Could not find 'allcel' (or 'allcell') in MAT file. Top-level keys: {keys}")
 
 
 def extract_optional_struct(mat_dict: Dict[str, Any], names: tuple[str, ...]) -> Dict[str, Any] | None:
-    """
-    Extract a top-level MATLAB struct if present.
-    """
     for n in names:
         if n in mat_dict and isinstance(mat_dict[n], dict):
             return mat_dict[n]
     return None
 
 
-# Better: just treat any field starting with id_ or containing "channel" as int-ish if it looks integer
-def maybe_cast_int(name: str, arr: Any) -> Any:
+def extract_traj(mat_dict: Dict[str, Any]) -> Any:
+    if "Traj" in mat_dict:
+        return mat_dict["Traj"]
+    keys = ", ".join(sorted(mat_dict.keys()))
+    raise KeyError(f"Could not find 'Traj' in MAT file. Top-level keys: {keys}")
+
+
+def maybe_cast_int(_name: str, arr: Any) -> Any:
     if not isinstance(arr, np.ndarray):
         return arr
     if arr.dtype.kind in ("i", "u"):
         return arr
-    # If floats but all close to integers -> cast
     if arr.dtype.kind == "f":
         if np.all(np.isfinite(arr)) and np.allclose(arr, np.round(arr)):
             return np.round(arr).astype(np.int64)
@@ -166,76 +170,173 @@ def maybe_cast_int(name: str, arr: Any) -> Any:
 
 
 def flatten_cell(x: Any) -> Any:
-    # Convert MATLAB column vectors like (N,1) into (N,)
     if isinstance(x, np.ndarray) and x.ndim == 2 and 1 in x.shape:
         return x.reshape(-1)
     return x
+
+
+def to_jsonable(x: Any) -> Any:
+    if isinstance(x, dict):
+        return {k: to_jsonable(v) for k, v in x.items()}
+    if isinstance(x, np.ndarray):
+        if x.dtype == object:
+            return [to_jsonable(v) for v in x.ravel()]
+        return x.tolist()
+    if isinstance(x, (list, tuple)):
+        return [to_jsonable(v) for v in x]
+    if isinstance(x, (np.integer, np.floating, np.bool_)):
+        return x.item()
+    return x
+
+
+def traj_to_records(traj_obj: Any) -> list[dict[str, Any]]:
+    if isinstance(traj_obj, dict):
+        return [traj_obj]
+    if isinstance(traj_obj, (list, tuple)):
+        out = [x for x in traj_obj if isinstance(x, dict)]
+        if out:
+            return out
+    if isinstance(traj_obj, np.ndarray) and traj_obj.dtype == object:
+        out = [x for x in traj_obj.ravel() if isinstance(x, dict)]
+        if out:
+            return out
+    raise TypeError("Unexpected Traj format. Expected dict or array/list of dict records.")
+
+
+def pack_traj_field(field_name: str, values: list[Any]) -> tuple[np.ndarray | None, bool]:
+    arrs: list[np.ndarray] = []
+    for v in values:
+        if isinstance(v, np.ndarray):
+            a = flatten_cell(v)
+        else:
+            a = np.asarray(v)
+        arrs.append(a)
+
+    if all(a.ndim == 0 for a in arrs):
+        raw = [a.item() for a in arrs]
+        if all(isinstance(x, str) for x in raw):
+            return np.asarray(raw, dtype=str), False
+        out = np.asarray(raw)
+        if out.dtype != object:
+            return maybe_cast_int(field_name, out), False
+        return None, True
+
+    shape0 = arrs[0].shape
+    if all(a.shape == shape0 for a in arrs):
+        try:
+            out = np.stack(arrs, axis=0)
+        except Exception:
+            return None, True
+        if out.dtype != object:
+            return maybe_cast_int(field_name, out), False
+
+    return None, True
+
 
 # -------------------------
 # Conversion
 # -------------------------
 
-def convert_one(mat_path: Path, out_root: Path, overwrite: bool, include_spikes: bool) -> Path:
-    if "Ratemap" not in mat_path.name:
-        raise ValueError(f"File does not contain 'Ratemap' in name: {mat_path.name}")
-
-    info = parse_session_info(mat_path)
-
-    # Output path: data/interim/MOUSE/DATE/<session>_allcel.npz
+def build_out_path(info: SessionInfo, out_root: Path, mode: str) -> Path:
     out_dir = out_root / safe_filename(info.mouse) / safe_filename(info.date)
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / f"{safe_filename(info.session_name)}_allcel.npz"
+    if mode == "ratemap":
+        return out_dir / f"{safe_filename(info.session_name)}_allcel.npz"
+    return out_dir / f"{safe_filename(info.session_name)}_trajdata.npz"
 
+
+def convert_one(
+    mat_path: Path,
+    out_root: Path,
+    overwrite: bool,
+    include_spikes: bool,
+    mode: str,
+    traj_fields_req: list[str] | None = None,
+) -> Path:
+    marker = "Ratemap" if mode == "ratemap" else "TrajData"
+    if marker.lower() not in mat_path.name.lower():
+        raise ValueError(f"File does not contain '{marker}' in name: {mat_path.name}")
+
+    info = parse_session_info(mat_path)
+    out_path = build_out_path(info, out_root, mode=mode)
     if out_path.exists() and not overwrite:
         return out_path
 
     md = load_mat_file(mat_path)
-    allcel = extract_allcel(md)
-    allpf = extract_optional_struct(md, ("allpf",))
-
-    # Build NPZ payload
     payload: Dict[str, Any] = {}
 
-    meta = {
+    meta: Dict[str, Any] = {
         "mouse": info.mouse,
         "date": info.date,
         "time": info.time,
         "session_name": info.session_name,
+        "mode": mode,
         "source_path": str(mat_path.resolve()),
         "source_mtime": mat_path.stat().st_mtime,
         "mat_keys": sorted(md.keys()),
-        "allcel_fields": sorted(allcel.keys()) if isinstance(allcel, dict) else None,
-        "allpf_fields": sorted(allpf.keys()) if isinstance(allpf, dict) else None,
-        "include_spikes": include_spikes,
     }
-    payload["meta_json"] = np.array(json.dumps(meta), dtype=np.string_)
 
-    for k, v in allcel.items():
-        if (not include_spikes) and (k.lower() == "spikes"):
-            continue
+    if mode == "ratemap":
+        allcel = extract_allcel(md)
+        allpf = extract_optional_struct(md, ("allpf",))
+        meta["allcel_fields"] = sorted(allcel.keys())
+        meta["allpf_fields"] = sorted(allpf.keys()) if isinstance(allpf, dict) else None
+        meta["include_spikes"] = include_spikes
+        payload["meta_json"] = np.array(json.dumps(meta), dtype=np.string_)
 
-        # Many entries are numeric arrays already; some may be nested dicts (structs)
-        if isinstance(v, dict):
-            # Store nested struct as JSON (small) or skip if large
-            payload[f"allcel__{k}__json"] = np.array(json.dumps(v, default=str), dtype=np.string_)
-            continue
+        for k, v in allcel.items():
+            if (not include_spikes) and (k.lower() == "spikes"):
+                continue
+            if isinstance(v, dict):
+                payload[f"allcel__{k}__json"] = np.array(json.dumps(v, default=str), dtype=np.string_)
+                continue
+            if isinstance(v, np.ndarray):
+                vv = maybe_cast_int(k, flatten_cell(v))
+                payload[f"allcel__{k}"] = vv
+            else:
+                payload[f"allcel__{k}__json"] = np.array(json.dumps(v, default=str), dtype=np.string_)
 
-        if isinstance(v, np.ndarray):
-            v = flatten_cell(v)
-            v = maybe_cast_int(k, v)
-            payload[f"allcel__{k}"] = v
-        else:
-            # store scalars / strings as JSON-safe
-            payload[f"allcel__{k}__json"] = np.array(json.dumps(v, default=str), dtype=np.string_)
-
-    # Export selected allpf fields needed downstream (spatial modulation flags).
-    if isinstance(allpf, dict):
-        if "ispf_cxu" in allpf:
+        if isinstance(allpf, dict) and "ispf_cxu" in allpf:
             v = allpf["ispf_cxu"]
             if isinstance(v, np.ndarray):
                 payload["allpf__ispf_cxu"] = maybe_cast_int("ispf_cxu", v)
             else:
                 payload["allpf__ispf_cxu__json"] = np.array(json.dumps(v, default=str), dtype=np.string_)
+
+    else:
+        traj = extract_traj(md)
+        records = traj_to_records(traj)
+        fields_all = sorted({k for rec in records for k in rec.keys()})
+        if traj_fields_req:
+            lookup = {f.lower(): f for f in fields_all}
+            selected: list[str] = []
+            missing: list[str] = []
+            for req in traj_fields_req:
+                hit = lookup.get(req.lower())
+                if hit is None:
+                    missing.append(req)
+                elif hit not in selected:
+                    selected.append(hit)
+            fields = selected
+            meta["traj_fields_requested"] = traj_fields_req
+            meta["traj_fields_missing"] = missing
+        else:
+            fields = fields_all
+
+        meta["traj_n_trials"] = len(records)
+        meta["traj_fields"] = fields
+        payload["meta_json"] = np.array(json.dumps(meta), dtype=np.string_)
+
+        for field in fields:
+            vals = [rec.get(field, np.nan) for rec in records]
+            packed, needs_json = pack_traj_field(field, vals)
+            if (not needs_json) and packed is not None:
+                payload[f"traj__{field}"] = packed
+            else:
+                payload[f"traj__{field}__json"] = np.array(
+                    json.dumps([to_jsonable(v) for v in vals], default=str),
+                    dtype=np.string_,
+                )
 
     np.savez_compressed(out_path, **payload)
     return out_path
@@ -252,41 +353,89 @@ def iter_mat_files(input_root: Path, recursive: bool) -> Iterable[Path]:
 
 
 def main() -> None:
-    
     ap = argparse.ArgumentParser()
-    ap.add_argument("--input", type=str, default="Epsztein-nas02/TEAM/Tadeo/data/raw", help="Input .mat file or directory (can be network path).")
-    ap.add_argument("--output", type=str, default="data/interim", help="Output directory for .npz files.")
+    ap.add_argument(
+        "--mode",
+        type=str,
+        choices=["ratemap", "trajdata"],
+        default="ratemap",
+        help="Choose conversion mode.",
+    )
+    ap.add_argument(
+        "--input",
+        type=str,
+        default="",
+        help=(
+            "Input .mat file or directory. "
+            "Default: data/raw (ratemap) or data/raw/trajdata (trajdata)."
+        ),
+    )
+    ap.add_argument(
+        "--output",
+        type=str,
+        default="",
+        help=(
+            "Output directory. "
+            "Default: data/interim for both modes."
+        ),
+    )
     ap.add_argument("--recursive", action="store_true", help="Recursively search for .mat files.")
     ap.add_argument("--overwrite", action="store_true", help="Overwrite existing .npz files.")
     ap.add_argument("--include-spikes", action="store_true", help="Include allcel.Spikes if present.")
+    ap.add_argument(
+        "--traj-fields",
+        type=str,
+        default="",
+        help=(
+            "Comma-separated Traj fields to export in trajdata mode. "
+            "Default uses a compact whitelist. Use 'all' to export every Traj field."
+        ),
+    )
     ap.add_argument("--dry-run", action="store_true", help="Only print what would be converted.")
     args = ap.parse_args()
 
-    raw_dir = Path(r"\\Epsztein-nas02\TEAM\Tadeo\data\raw")
-    print(raw_dir.exists())
+    if args.input:
+        in_path = Path(args.input)
+    else:
+        in_path = Path("data/raw/trajdata") if args.mode == "trajdata" else Path("data/raw")
 
-    in_path = raw_dir
-    out_root = Path(args.output)
+    if args.output:
+        out_root = Path(args.output)
+    else:
+        out_root = Path("data/interim")
     out_root.mkdir(parents=True, exist_ok=True)
 
     mat_files = list(iter_mat_files(in_path, recursive=args.recursive))
-    # Filter to those containing "Ratemap" in the name
-    mat_files = [p for p in mat_files if ("Ratemap" in p.name and p.suffix.lower() == ".mat")]
+    marker = "ratemap" if args.mode == "ratemap" else "trajdata"
+    mat_files = [p for p in mat_files if (marker in p.name.lower() and p.suffix.lower() == ".mat")]
 
     if not mat_files:
-        raise SystemExit(f"No '*Ratemap*.mat' files found in {in_path}")
+        raise SystemExit(f"No '*{marker}*.mat' files found in {in_path}")
+
+    traj_fields_req: list[str] | None = None
+    if args.mode == "trajdata":
+        if args.traj_fields.strip().lower() == "all":
+            traj_fields_req = None
+        else:
+            traj_fields_req = parse_csv_list(args.traj_fields) or DEFAULT_TRAJ_FIELDS
 
     print(f"Found {len(mat_files)} file(s).")
     for p in mat_files:
         info = parse_session_info(p)
-        out_dir = out_root / safe_filename(info.mouse) / safe_filename(info.date)
-        out_path = out_dir / f"{safe_filename(info.session_name)}_allcel.npz"
+        out_path = build_out_path(info, out_root=out_root, mode=args.mode)
         if args.dry_run:
             print(f"[DRY] {p} -> {out_path}")
             continue
 
         try:
-            outp = convert_one(p, out_root=out_root, overwrite=args.overwrite, include_spikes=args.include_spikes)
+            outp = convert_one(
+                p,
+                out_root=out_root,
+                overwrite=args.overwrite,
+                include_spikes=args.include_spikes,
+                mode=args.mode,
+                traj_fields_req=traj_fields_req,
+            )
             print(f"[OK]  {p.name} -> {outp}")
         except Exception as e:
             print(f"[ERR] {p.name}: {e}")
