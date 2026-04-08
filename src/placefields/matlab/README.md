@@ -155,6 +155,106 @@ For each cell `g`:
   - keeps lap fields overlapping condition field
   - extracts PF features into `pf.feat(c)`
 
+## 4.8 Detailed place-field detection (bootstrap/null model)
+
+This section expands the exact detection logic implemented in:
+
+- [fct_placefield_simtrain.m](/c:/Users/tadse/OneDrive/Documenti/GitHub/CA1-cellclass/src/placefields/matlab/fct_placefield_simtrain.m)
+- [fct_find_placefield.m](/c:/Users/tadse/OneDrive/Documenti/GitHub/CA1-cellclass/src/placefields/matlab/fct_find_placefield.m)
+
+### Step A: Build null maps per lap (`fct_placefield_simtrain`)
+
+For each trial/lap `t`, the function generates `nb_rep` surrogate maps under a no-place-coding null, while preserving trial-level spike load.
+
+1. Preprocess position support:
+   - Remove behavior samples listed in `prm.idx_rem` (`xpos(prm.idx_rem)=NaN`).
+   - Remove edge spatial bins according to `xbin_rem`.
+2. For each trial `t`:
+   - Find valid time samples in that trial (`idxnonan`) that are non-NaN and inside spatial bin range.
+   - Compute:
+     - `N = number of valid samples`
+     - `nbspk = total spikes on that trial` (`sum(rmap.nbspk_tx(t,:))`)
+   - Edge case:
+     - if `N == 0`, set `N=1`, `nbspk=0` so the simulation remains well-defined.
+3. Simulate spike placement (`prm.mtd`):
+   - `random`:
+     - for each repetition, place `nbspk` spikes uniformly among the `N` valid samples
+     - convert simulated spike positions to binned counts (`fct_hist`)
+   - `poisson`:
+     - for each repetition and valid sample, sample spike counts from `Poisson(nbspk/N)`
+     - project counts to spatial bins (`fct_discretize` + `accumarray`)
+4. Convert surrogate counts to surrogate smoothed rate maps:
+   - smooth simulated counts (`fct_smoothgauss`)
+   - divide by observed smoothed dwell (`rmap.dwell_s_tx(t,:)`)
+   - smooth again
+5. Store output:
+   - `fr_s_txrep(t, x, rep)` = surrogate smoothed rate at bin `x`, repetition `rep`.
+
+Interpretation:
+- The null preserves trial duration/occupancy support and total spike count per trial, but destroys structured spike-position coupling expected from a real field.
+
+### Step B: Trial-level p-values and binary fields (`fct_find_placefield`)
+
+For each trial `t` and position bin `x`, compute a one-sided empirical p-value:
+
+- `pval_pf_tx(t,x) = (# reps with fr_null(t,x,rep) >= fr_obs(t,x)) / nb_rep`
+
+Then threshold p-values into a binary field mask:
+
+- `ispf_tx(t,:) = fct_placefield_threshold(pval_pf_tx(t,:), prm)`
+
+This threshold function applies:
+- core significance (`pval_crit`)
+- minimum/maximum field width (`min_len`, `max_len`)
+- merge/extension rules (`max_btw_pf`, `max_ext_pf`, `pval_edge_pf`)
+
+### Step C: Condition-level field from trial-averaged null
+
+For each condition/direction `c`:
+
+1. Select laps in that condition: `idx = (idcond_t == c)`.
+2. Build condition-level null by averaging surrogate maps across selected laps:
+   - `A(x,rep) = mean_t fr_s_txrep(t,x,rep)` over `t in idx`.
+3. Compute condition-level p-value against observed condition map:
+   - `pval_pf_cx(c,x) = (# reps with A(x,rep) >= fr_obs_c(c,x)) / nb_rep`
+4. Threshold:
+   - `ispf_cx(c,:) = fct_placefield_threshold(pval_pf_cx(c,:), prm)`
+
+### Step D: Stability and consistency filters (condition level)
+
+After significance thresholding, condition-level fields are refined:
+
+1. Stability filter:
+   - `ispf_cx(c,:) = fct_placefield_stability(rmap.fr_s_tx(idx,:), ispf_cx(c,:), prm)`
+   - enforces consistency of trial maps with the condition field (`pctstab`, `stab` parameters).
+2. Peak ordering:
+   - `ispf_cx(c,:) = fct_placefield_peakorder(rmap.fr_s_cx(c,:), ispf_cx(c,:))`
+   - orders fields by descending peak activity.
+3. Trial-condition overlap constraint:
+   - `pf.ispf_tx(idx,:) = fct_placefield_keepoverlap(pf.ispf_tx(idx,:), pf.ispf_cx(c,:))`
+   - keeps only per-lap fields that overlap accepted condition-level fields.
+
+### Step E: Feature extraction
+
+For each condition `c`, final features are extracted from filtered trial/condition masks:
+
+- `pf.feat(c) = fct_placefield_features(rmap.fr_s_tx(idx,:), pf.ispf_tx(idx,:), pf.ispf_cx(c,:))`
+
+This produces the final per-field metrics used downstream (rate in/out, size, peak bin, lap variability, etc.).
+
+### Notes on defaults currently used in code
+
+`fct_find_placefield.m` contains updated defaults (different from the commented OLD block):
+
+- `min_len = 2`
+- `max_btw_pf = 3`
+- `max_ext_pf = 3`
+- `pval_crit = 0.05`
+- `frmax = 1.5`
+- `pctspklap = 0.45`
+
+When reproducing analyses, always record the exact `pf.prm` saved with outputs, because these values strongly impact field detection rates.
+
 ## 5) Output structures at this stage
 
 Per neuron (`rmap(g)`):

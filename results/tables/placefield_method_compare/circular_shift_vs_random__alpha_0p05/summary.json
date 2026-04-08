@@ -1,0 +1,47 @@
+{
+  "inputs": {
+    "a_csv": "results\\placefield_null\\ssi_classification.csv",
+    "b_csv": "results\\placefield_null_random_2p5\\ssi_classification.csv",
+    "name_a": "circular_shift",
+    "name_b": "random",
+    "alpha": 0.05
+  },
+  "method_a": {
+    "n_rows": 5010,
+    "n_units": 1234,
+    "n_sm_rows": 650,
+    "sm_row_rate": 0.12974051896207583
+  },
+  "method_b": {
+    "n_rows": 5062,
+    "n_units": 1260,
+    "n_sm_rows": 2014,
+    "sm_row_rate": 0.3978664559462663
+  },
+  "comparison_rows": {
+    "n_overlap": 5010,
+    "n_only_a": 0,
+    "n_only_b": 52,
+    "n_discordant": 1446,
+    "discordant_rate": 0.288622754491018,
+    "confusion": {
+      "both_not_sm": 2963,
+      "a_only_sm": 49,
+      "b_only_sm": 1397,
+      "both_sm": 601
+    }
+  },
+  "comparison_units": {
+    "n_overlap_units": 1234,
+    "n_discordant_units": 422,
+    "discordant_rate_units": 0.3419773095623987,
+    "confusion": {
+      "both_not_sm": 424,
+      "a_only_sm": 10,
+      "b_only_sm": 412,
+      "both_sm": 388
+    },
+    "n_only_a_units": 0,
+    "n_only_b_units": 26
+  }
+}
