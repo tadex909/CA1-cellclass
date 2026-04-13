@@ -15,7 +15,12 @@ This repository has two main layers:
 - `src/cellclass/`
   - Core library code for signal processing, ACG/waveform features, and IO utilities.
 - `scripts/`
-  - End-to-end orchestration scripts (interim -> processed, aggregation by mouse/age).
+  - Organized CLI entry points:
+    - `scripts/pipelines/` (data/feature/placefield pipelines)
+    - `scripts/reports/` (plots/comparison tables)
+    - `scripts/maintenance/` (registry/reorg helpers)
+    - `scripts/legacy/` (older scripts)
+  - See `scripts/README.md` for canonical commands and temporary compatibility wrappers.
 - `src/models/`
   - Modeling scripts:
     - `fitting.py`: systematic GMM model selection (`k`, feature subsets).
@@ -26,7 +31,8 @@ This repository has two main layers:
 - `data/`
   - Raw/interim/processed data.
 - `results/`
-  - Aggregated age-group datasets and modeling outputs.
+  - Aggregated age-group datasets, modeling outputs, and run-scoped analysis artifacts.
+  - Use `scripts/maintenance/build_results_registry.py` to index runs and outputs.
 
 ---
 
@@ -44,11 +50,11 @@ Typical outputs include:
 
 Main orchestration scripts:
 
-1. `scripts/interim_to_processed.py`
+1. `scripts/pipelines/interim_to_processed.py`
    - Runs extraction on all interim `.npz` sessions.
    - Writes per-session files under `data/processed/<mouse>/...`.
 
-2. `scripts/aggreggate_by_age.py`
+2. `scripts/pipelines/aggregate_by_age.py`
    - Merges sessions with age metadata (`data/schedule.xlsx`).
    - Writes age-group datasets in `results/<AGE>/`.
 
@@ -93,13 +99,13 @@ From repository root:
 1. Process interim sessions
 
 ```powershell
-python scripts/interim_to_processed.py --interim_root data/interim --processed_root data/processed --skip_existing
+python scripts/pipelines/interim_to_processed.py --interim_root data/interim --processed_root data/processed --skip_existing
 ```
 
 2. Aggregate by age group
 
 ```powershell
-python scripts/aggreggate_by_age.py --processed_root data/processed --excel data/schedule.xlsx --outdir results --qc
+python scripts/pipelines/aggregate_by_age.py --processed_root data/processed --excel data/schedule.xlsx --outdir results --qc
 ```
 
 3. Run GMM model selection
@@ -118,6 +124,19 @@ python src/models/compare_type_u.py --results_root results --out_root results/ty
 
 ```powershell
 python src/models/stability_analysis.py --results_root results --out_root results/stability --age_group P23_24 --subset_mode leave_one_out --seeds 0,1,2,3,4,5,6,7,8,9 --n_init 10
+```
+
+6. Build a results registry/index (recommended)
+
+```powershell
+python scripts/maintenance/build_results_registry.py --results_root results --out_root results/tables/results_registry
+```
+
+7. Create an organized non-destructive results view (optional)
+
+```powershell
+python scripts/maintenance/create_results_view.py --results_root results --view_root results/_organized
+python scripts/maintenance/create_results_view.py --results_root results --view_root results/_organized --mode hardlink --execute
 ```
 
 ---

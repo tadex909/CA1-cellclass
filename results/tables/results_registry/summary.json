@@ -1,0 +1,30 @@
+{
+  "results_root": "results",
+  "out_root": "results\\tables\\results_registry",
+  "n_top_level_dirs": 30,
+  "n_run_configs": 15,
+  "n_latest_pointers": 0,
+  "top_level_category_counts": {
+    "datasets": 14,
+    "models": 10,
+    "placefields": 5,
+    "reports": 1
+  },
+  "scripts_with_runs": {
+    "feature_set_experiments": 1,
+    "model_selection": 1,
+    "stability\\P15_16": 1,
+    "stability\\P17_18": 1,
+    "stability\\P19_20": 1,
+    "stability\\P21_22": 1,
+    "stability\\P23_24": 1,
+    "stability\\P25": 1,
+    "type_u_comparison": 1,
+    "type_u_comparison_few": 1,
+    "type_u_comparison_smallfeat": 1,
+    "type_u_comparison_valero_feats": 1,
+    "type_u_comparison_valero_feats_3": 1,
+    "type_u_comparison_valero_feats_log": 1,
+    "type_u_comparison_valero_feats_log_vfr": 1
+  }
+}

@@ -1,0 +1,306 @@
+%select_your data
+% main_folder='X:\MATLAB\Data\All_data_final\';
+% h=readtable(strcat(main_folder,'Finalyses_vinca.xlsx'));
+% keep_dat=h.session_name(logical(h.doselect_bhv));
+% age=h.Age(logical(h.doselect_bhv));
+% clear h;
+% cd(strcat(main_folder,'process\'));
+ccc
+old_folder='X:\MATLAB\Data\All_data_final\';
+h=readtable(strcat(old_folder,'Finalyses_Vinca.xlsx'));
+keep_dat=h.session_name(logical(h.doselect_all));
+age=h.Age(logical(h.doselect_all));
+poids=h.Weight(logical(h.doselect_all));
+main_folder='X:\MATLAB\Data\Data_thèse\'
+cd(strcat(main_folder));
+%% Par cellules
+supool.session_idcel=[];    
+supool.age=[];
+supool.poids=[];
+supool.keptsession_idcel=[];
+supool.type_u=[];
+supool.pyr_uc = [];
+supool.pyr_active_uc = []; 
+supool.pyr_inactive_uc = []; 
+supool.pc_uc = [];
+supool.bid_uc = [];
+supool.uni_uc = []; 
+supool.pyr_nonsm_uc = []; 
+supool.ispf_ucf = [];
+supool.fr_uc = [];
+supool.outovin_ucf = [];
+supool.size_ucf = [];
+supool.lap_devwithmean_ucf = [];
+supool.si_meanlap_uc = [];
+supool.stb_allpairs_uc = [];
+supool.stb_oddeven_uc=[];
+supool.sparsity_uc=[];
+supool.scd_nr_uc = [];
+supool.scp_nr_uc = [];
+supool.pyr_bid_uc = [];
+supool.ispf_cxu = [];
+supool.nb_pf_cxu = [];
+supool.ifrmax_ucf = [];
+supool.fr_s_cxu = [];
+supool.si_uc = [];
+supool.CondName_uc=[];
+%par trajectoires
+supool.keptsession_idw=[];
+supool.icond = [];
+supool.condname=[];
+
+%scores par conditions
+supool.nbcond=[];
+supool.nb_lap_condw=[];
+supool.nb_rew_condw=[];
+supool.freq_lap_condw=[];
+supool.freq_reward_sess=[];
+supool.freq_reward_condw=[];
+supool.vel_cond = [];
+supool.vel_condw =[];
+supool.vel_norew_condw  = [];
+supool.ts_imm_norew_condw=[];
+supool.ts_imm_norew_condw=[];
+supool.ts_imm_condw=[];
+
+supool.pct_pyr_active_c = [];
+supool.pct_pyr_sm_c = [];
+supool.pct_pyr_bid_c = [];
+supool.pct_pyr_uni_c = [];
+supool.nb_pyr_active_c = [];
+supool.nb_pyr_sm_c = [];
+supool.nb_pyr_bid_c = [];
+supool.pct_pyr_bid_c = [];
+
+
+supool.agegrp = [];
+supool.condw=[];
+%not done yet
+supool.deepmidsup = [];
+supool.remap_uc = [];
+supool.pfloc_ucf = [];
+supool.ifrmax_uc = [];
+
+supool.indpos_nr_uc = [];
+supool.inddis_nr_uc = [];
+
+j=1;
+%% load data
+for i=1:length(keep_dat)
+%for i=g5(1):g5(end)
+    load(strcat(main_folder,char(keep_dat(i)),'_Ratemap_final_thèse_CASE1.mat'));
+    load(strcat(main_folder,char(keep_dat(i)),'_TrajData.mat'));    
+    disp(keep_dat(i));
+
+
+
+behav=struct();
+maxc = 5;
+behav.icond=NaN(maxc,1);
+
+behav.indcond=[];
+behav.nb_lap_condw = NaN(maxc*2, 1);
+behav.nb_rew_condw = NaN(maxc*2, 1);
+
+behav.freq_lap_condw = NaN(maxc*2, 1);
+behav.freq_rew_condw = NaN(maxc*2, 1);
+
+behav.pct_rew_condw = NaN(maxc*2, 1);
+
+behav.ts_imm_condw = NaN(maxc*2, 1);
+behav.vel_condw = NaN(maxc*2, 1);
+behav.ts_imm_norew_condw = NaN(maxc*2, 1);
+behav.vel_norew_condw = NaN(maxc*2, 1);
+
+behav.ts_imm_condw = NaN(maxc*2, 1);
+behav.vel_condw = NaN(maxc*2, 1);
+behav.ts_imm_norew_condw = NaN(maxc*2, 1);
+behav.vel_norew_condw = NaN(maxc*2, 1);
+behav.condnam = cell(maxc, 1);
+%%
+m=1 ;
+for c=1:length(Traj);
+        if c==1;
+            behav.icond(m)= Traj(c).Cond;
+             behav.condnam{m} = Traj(c).condition;
+            behav.indcond=[behav.indcond,m];
+         elseif behav.icond(m,1)~=Traj(c).Cond;    %premier new cond
+             m=m+1;
+             behav.icond(m)=Traj(c).Cond;
+              behav.condnam{m} = Traj(c).condition;
+            behav.indcond=[behav.indcond,m];
+%         elseif behav.indcond(1,c-1)==Traj(c).Cond 
+        else
+            behav.icond(m)=Traj(c).Cond;
+            behav.indcond=[behav.indcond,m];
+             %behav.condnam{c} = Traj(c).condition;
+        end 
+end
+
+%     isway=startsWith({Traj(1:length([Traj.Cond])).WB},'W')
+%     newcond=[Traj.Cond]-1
+%     iswayc=isway+newcond*2+1
+%     supool.condw=[supool.condw,iswayc]
+    supool.condw=[supool.condw,[Traj(1:length(Traj)).icondway_tr]];
+    supool.nbcond=[supool.nbcond;length(behav.icond((all((~isnan(behav.icond)),2)),:))];
+    supool.icond = [supool.icond ; behav.icond]; 
+    supool.condname = [supool.condname; behav.condnam];
+    Traj(1).vel_cond_w=[];
+    for x=1:length(Traj) ;
+     %Traj.vel_cond_w = [Traj.vel_cond_w ; nanmean(Traj(x).Speed)];
+     Traj(x).vel_cond_w = [nanmean(Traj(x).XSpeed)];
+     supool.keptsession_idw=[supool.keptsession_idw;j];
+
+    end
+    for c = 1:(supool.nbcond); %
+
+%             ind = find(behav.indcond== c); %
+            ind = find([Traj.Cond].'==c); %ATTENTION ICI JE RASSEMBLE TOUS LES PO ENSEMBLE ET TOUS LES PNO ENSEMBLES. SI VOUS VOULEZ PAR CONDITION DE SORTE A AOIR 5 GROUPES POUR CHAQUE PRESENTATION REMPLACER TRAJ COND PAR BEHAV.INDCOND
+            dur_alllaps = nansum([Traj.dur].');
+            behav.nb_lap_condw(c) = length(ind); 
+            behav.nb_rew_condw(c) = length([Traj(ind).Cond].'); 
+
+            behav.freq_lap_condw(c) = behav.nb_lap_condw(c) / dur_alllaps;
+            behav.freq_rew_condw(c) = behav.nb_rew_condw(c) / dur_alllaps;
+
+            behav.pct_rew_condw(c) = behav.nb_rew_condw(c) / behav.nb_lap_condw(c);
+
+            behav.ts_imm_condw(c) = nanmean([Traj(1,ind).pcentStopped].');
+             
+            behav.vel_condw(c) = nanmean([Traj(ind).vel_cond_w].');
+            behav.ts_imm_norew_condw(c) = behav.ts_imm_condw(c);
+            behav.vel_norew_condw(c) = behav.vel_condw(c);
+
+
+   end
+
+    
+
+    
+    for k = 1:allcel.nb_cel
+    supool.session_idcel = [supool.session_idcel;keep_dat(i)];
+    supool.keptsession_idcel= [supool.keptsession_idcel;j];
+    supool.agegrp=[age];
+    supool.age=[supool.age;age(i)];
+    supool.poids=[supool.poids;poids(i)];
+    end
+ supool.nb_lap_condw=[supool.nb_lap_condw;behav.nb_lap_condw];
+ supool.nb_rew_condw=[supool.nb_rew_condw;behav.nb_rew_condw];
+ supool.freq_lap_condw=[supool.freq_lap_condw;behav.freq_lap_condw];
+supool.vel_condw=[supool.vel_condw;behav.vel_condw];
+supool.vel_cond = [supool.vel_cond; nanmean(supool.vel_condw)];
+supool.freq_reward_sess=[supool.freq_reward_sess;length([Traj.Cond])/(sum([Traj.dur].')/60)];
+supool.freq_reward_condw=[supool.freq_reward_condw;behav.freq_rew_condw]*60;
+% supool.freq_rewardsess=[supool.freq_rewardsess;supool.nbcond/sum([Traj.dur].')];
+supool.vel_norew_condw  = [supool.vel_norew_condw;behav.vel_norew_condw];
+ supool.ts_imm_norew_condw=[supool.ts_imm_norew_condw;behav.ts_imm_norew_condw];
+supool.ts_imm_condw=[supool.ts_imm_condw;behav.ts_imm_condw];
+ 
+    supool.pyr_uc = [supool.pyr_uc ; allcel.pyr_uc];
+    supool.type_u=[supool.type_u;allcel.type_u];
+    supool.pyr_active_uc = [supool.pyr_active_uc ; allcel.pyr_active_uc]; %
+    supool.pyr_inactive_uc = [supool.pyr_inactive_uc ; allcel.pyr_inactive_uc]; %
+    supool.pc_uc = [supool.pc_uc ; allcel.pyr_sm_uc];
+    supool.bid_uc = [supool.bid_uc ; allcel.pyr_bid_uc];
+    supool.uni_uc = [supool.uni_uc ; allcel.pyr_uni_uc]; %
+    supool.pyr_nonsm_uc = [supool.pyr_nonsm_uc ; allcel.pyr_nonsm_uc]; 
+    
+    
+   allpf.feat.ispf_ucf(:,size(allpf.feat.ispf_ucf(1,:,1),2)+1:10,:)=zeros(size(allpf.feat.ispf_ucf(:,1,1),1),10-size(allpf.feat.ispf_ucf(1,:,1),2),5)
+    supool.ispf_ucf = cat(1, supool.ispf_ucf, allpf.feat.ispf_ucf); 
+    
+    supool.pct_pyr_active_c = [supool.pct_pyr_active_c ; allcel.pct_pyr_active_c]; 
+    supool.pct_pyr_sm_c = [supool.pct_pyr_sm_c ; allcel.pct_pyr_sm_c]; 
+    supool.pct_pyr_bid_c = [supool.pct_pyr_bid_c ; allcel.pct_pyr_bid_c];
+    supool.pct_pyr_uni_c = [supool.pct_pyr_uni_c ; allcel.pct_pyr_uni_c];
+    
+    supool.nb_pyr_active_c = [supool.nb_pyr_active_c ; allcel.nb_pyr_active_c];
+    supool.nb_pyr_sm_c = [supool.nb_pyr_sm_c ; allcel.nb_pyr_sm_c];
+    supool.nb_pyr_bid_c = [supool.nb_pyr_bid_c ; allcel.nb_pyr_bid_c];
+
+     allrmap.feat.fr_uc(:,size(allrmap.feat.fr_uc(1,:,1),2)+1:10)=zeros(size(allrmap.feat.fr_uc(:,1),1),10-size(allrmap.feat.fr_uc(1,:),2));
+    supool.fr_uc = [supool.fr_uc ; allrmap.feat.fr_uc];
+    
+    allpf.feat.outovin_ucf(:,size(allpf.feat.outovin_ucf(1,:,1),2)+1:10,:)=nan(size(allpf.feat.outovin_ucf(:,1,1),1),10-size(allpf.feat.outovin_ucf(1,:,1),2),5);
+    supool.outovin_ucf = cat(1, supool.outovin_ucf, allpf.feat.outovin_ucf);
+    
+    
+    allpf.feat.size_ucf(:,size(allpf.feat.size_ucf(1,:,1),2)+1:10,:)=nan(size(allpf.feat.size_ucf(:,1,1),1),10-size(allpf.feat.size_ucf(1,:,1),2),5);
+    supool.size_ucf = cat(1, supool.size_ucf, allpf.feat.size_ucf);
+    
+     allpf.feat.ifrmax_ucf(:,size(allpf.feat.ifrmax_ucf(1,:,1),2)+1:10,:)=nan(size(allpf.feat.ifrmax_ucf(:,1,1),1),10-size(allpf.feat.ifrmax_ucf(1,:,1),2),5);
+     supool.ifrmax_ucf = cat(1, supool.ifrmax_ucf, allpf.feat.ifrmax_ucf);
+         
+     allpf.feat.lap_devwithmean_ucf(:,size(allpf.feat.lap_devwithmean_ucf(1,:,1),2)+1:10,:)=nan(size(allpf.feat.lap_devwithmean_ucf(:,1,1),1),10-size(allpf.feat.lap_devwithmean_ucf(1,:,1),2),5);
+    supool.lap_devwithmean_ucf = cat(1, supool.lap_devwithmean_ucf, allpf.feat.lap_devwithmean_ucf);
+    
+     allrmap.feat.si_meanlap_uc(:,size(allrmap.feat.si_meanlap_uc(1,:,1),2)+1:10)=nan(size(allrmap.feat.si_meanlap_uc(:,1),1),10-size(allrmap.feat.si_meanlap_uc(1,:),2));
+     supool.si_meanlap_uc = [supool.si_meanlap_uc ; allrmap.feat.si_meanlap_uc];
+     
+       allrmap.feat.si_uc(:,size( allrmap.feat.si_uc(1,:,1),2)+1:10)=nan(size( allrmap.feat.si_uc(:,1),1),10-size( allrmap.feat.si_uc(1,:),2));
+      supool.si_uc = [supool.si_uc ; allrmap.feat.si_uc];
+      
+        allrmap.feat.sparsity_uc(:,size( allrmap.feat.sparsity_uc(1,:,1),2)+1:10)=nan(size(  allrmap.feat.sparsity_uc(:,1),1),10-size(allrmap.feat.sparsity_uc(1,:),2));
+        supool.sparsity_uc=[supool.sparsity_uc;allrmap.feat.sparsity_uc];
+        
+       allrmap.feat.stb_allpairs_uc(:,size( allrmap.feat.stb_allpairs_uc(1,:,1),2)+1:10)=nan(size( allrmap.feat.stb_allpairs_uc(:,1),1),10-size( allrmap.feat.stb_allpairs_uc(1,:),2));
+      supool.stb_allpairs_uc = [supool.stb_allpairs_uc ; allrmap.feat.stb_allpairs_uc];
+      
+      allrmap.feat.stb_oddeven_uc(:,size( allrmap.feat.stb_oddeven_uc(1,:,1),2)+1:10)=nan(size( allrmap.feat.stb_oddeven_uc(:,1),1),10-size( allrmap.feat.stb_oddeven_uc(1,:),2));
+      supool.stb_oddeven_uc=[supool.stb_oddeven_uc;allrmap.feat.stb_oddeven_uc];
+      
+      allrmap.fr_s_cxu(size(allrmap.fr_s_cxu,1)+1:10,:,:)=nan(10-size(allrmap.fr_s_cxu,1),size(allrmap.fr_s_cxu,2),size(allrmap.fr_s_cxu,3));
+       keep_dat(i)
+      supool.fr_s_cxu = cat(3, supool.fr_s_cxu, allrmap.fr_s_cxu);
+    
+    supool.scd_nr_uc = [supool.scd_nr_uc ; allrmap.feat.scd_nr_uc];
+    supool.scp_nr_uc = [supool.scp_nr_uc ; allrmap.feat.scp_nr_uc];
+    
+    supool.pyr_bid_uc = [supool.pyr_bid_uc ; allcel.pyr_bid_uc];
+    
+    allpf.ispf_cxu(size(allpf.ispf_cxu,1)+1:10,:,:)=nan(10-size(allpf.ispf_cxu,1),size(allpf.ispf_cxu,2),size(allpf.ispf_cxu,3));
+    supool.ispf_cxu = cat(3, supool.ispf_cxu, allpf.ispf_cxu);
+    p = max(allpf.ispf_cxu, [], 2);
+    pp = permute(p, [3 1 2]);
+    supool.nb_pf_cxu = cat (1, supool.nb_pf_cxu, pp);
+
+    j=j+1;
+end
+
+session_names=unique(supool.session_idcel);
+session_ids=unique(supool.keptsession_idcel);
+icondnew=[];
+condnamnew=[];
+condnam_uc=[];
+for i = 1:5:length(supool.icond)
+
+ current_icond=supool.icond(i:i+4);
+ icondnew=[icondnew;current_icond.'];
+current_condnam=supool.condname(i:i+4);
+condnamnew=[condnamnew;current_condnam.'];
+end
+
+for j=1:length(supool.keptsession_idcel)
+    sessid=supool.keptsession_idcel(j);
+    condnam_uc=[condnam_uc;condnamnew(sessid,:)];
+end
+supool.CondName_uc=condnam_uc;
+
+
+save('supool_final_all_sess_VINCACRITS','supool')
+
+tab=table(supool.age,supool.keptsession_idcel,supool.pyr_uc,supool.pyr_active_uc,supool.pc_uc,supool.fr_uc,supool.outovin_ucf(:,:,1),supool.size_ucf(:,:,1),supool.lap_devwithmean_ucf(:,:,1),supool.si_meanlap_uc,supool.stb_allpairs_uc)
+tab.Properties.VariableNames{1} = 'age';
+tab.Properties.VariableNames{2} = 'idsess';
+tab.Properties.VariableNames{3} = 'pyr_uc';
+tab.Properties.VariableNames{4} = 'pyr_active_uc';
+tab.Properties.VariableNames{5} = 'pc_uc';
+tab.Properties.VariableNames{6} = 'fr_uc';
+tab.Properties.VariableNames{7} = 'out_in';
+tab.Properties.VariableNames{8} = 'size_pf';
+tab.Properties.VariableNames{9} = 'deviaton';
+tab.Properties.VariableNames{10} = 'spatialinfo';
+tab.Properties.VariableNames{11} = 'stab';
+save('supool.xls','tab')
+writetable(tab,'supool_all_sess.xls');
+% (tab,'supool.xslx')

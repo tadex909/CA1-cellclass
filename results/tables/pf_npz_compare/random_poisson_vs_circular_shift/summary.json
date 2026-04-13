@@ -1,0 +1,43 @@
+{
+  "inputs": {
+    "interim_root": "data\\interim",
+    "suffix_a": "_pf.npz",
+    "suffix_b": "_pf_c.npz",
+    "name_a": "random_poisson",
+    "name_b": "circular_shift"
+  },
+  "pairs": {
+    "n_sessions_total": 66,
+    "n_sessions_paired": 66,
+    "n_sessions_missing": 0,
+    "n_duplicates_a": 0,
+    "n_duplicates_b": 0,
+    "n_load_errors": 0
+  },
+  "comparison_rows": {
+    "n_overlap": 12610,
+    "n_only_a": 0,
+    "n_only_b": 0,
+    "n_discordant": 330,
+    "discordant_rate": 0.026169706582077717,
+    "confusion": {
+      "both_no_pf": 11342,
+      "a_only_pf": 272,
+      "b_only_pf": 58,
+      "both_pf": 938
+    }
+  },
+  "comparison_units": {
+    "n_overlap_units": 1261,
+    "n_discordant_units": 99,
+    "discordant_rate_units": 0.07850911974623315,
+    "confusion": {
+      "both_no_pf": 676,
+      "a_only_pf": 79,
+      "b_only_pf": 20,
+      "both_pf": 486
+    },
+    "n_only_a_units": 0,
+    "n_only_b_units": 0
+  }
+}

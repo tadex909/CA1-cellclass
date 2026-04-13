@@ -12,8 +12,8 @@ This README reflects the current state of:
 - `src/placefields/pipeline.py` (ratemap builder)
 - `src/placefields/bootstrap.py` (MATLAB-like null-map simulation + empirical p-values)
 - `src/placefields/ssi.py` (Spatial Selectivity Index + null-distribution p-values)
-- `scripts/build_ratemap_from_interim.py` (session pairing + ratemap run)
-- `scripts/build_placefield_null_from_interim.py` (session-level null bootstrap + p-values)
+- `scripts/pipelines/build_ratemap_from_interim.py` (session pairing + ratemap run)
+- `scripts/pipelines/build_placefield_null_from_interim.py` (session-level null bootstrap + p-values)
 
 ## Workflow
 
@@ -24,7 +24,18 @@ This README reflects the current state of:
    - `data/interim/<MOUSE>/<DATE>/<SESSION>_allcel.npz`
    - `data/interim/<MOUSE>/<DATE>/<SESSION>_trajdata.npz`
 3. Build ratemaps by pairing files with the same session stem:
-   - output: `results/ratemap/<MOUSE>/<DATE>/<SESSION>_rmap.npz`
+   - output (default): `results/ratemap/<RUN_ID>/<MOUSE>/<DATE>/<SESSION>_rmap.npz`
+   - legacy output (with `--no_run_subdir`): `results/ratemap/<MOUSE>/<DATE>/<SESSION>_rmap.npz`
+
+## Run IDs And Run Configs
+
+`build_ratemap_from_interim.py` and `build_placefield_null_from_interim.py` support run-scoped output folders.
+
+- By default:
+  - each run writes to `<out_root>/<run_id>/...`
+  - each run folder includes `run_config.json`
+  - `<out_root>/LATEST_RUN.txt` is updated to point to the last run id
+- To keep the old flat behavior, pass `--no_run_subdir`.
 
 ## Data Extraction (MAT -> NPZ)
 
@@ -47,7 +58,7 @@ C:\Users\tadse\miniconda3\envs\odors\python.exe src/cellclass/mat_to_npz.py `
 
 ## Build Ratemaps From Paired Interim Files
 
-`scripts/build_ratemap_from_interim.py`:
+`scripts/pipelines/build_ratemap_from_interim.py`:
 
 - finds `*_allcel.npz` and `*_trajdata.npz` pairs in `data/interim` (via `interim_io`)
 - downsamples spike indices `25000 Hz -> 1000 Hz`
@@ -57,15 +68,16 @@ C:\Users\tadse\miniconda3\envs\odors\python.exe src/cellclass/mat_to_npz.py `
 Example:
 
 ```powershell
-C:\Users\tadse\miniconda3\envs\odors\python.exe scripts/build_ratemap_from_interim.py `
+C:\Users\tadse\miniconda3\envs\odors\python.exe scripts/pipelines/build_ratemap_from_interim.py `
   --interim_root data/interim `
   --out_root results/ratemap `
+  --run_id ratemap_sm2p8_xrem10 `
   --min_speed 2.0
 ```
 
 ## Build Null Bootstrap Maps/P-values
 
-`scripts/build_placefield_null_from_interim.py`:
+`scripts/pipelines/build_placefield_null_from_interim.py`:
 
 - reuses the same interim allcel+traj pairs
 - rebuilds ratemap tensors per session
@@ -96,10 +108,12 @@ C:\Users\tadse\miniconda3\envs\odors\python.exe scripts/build_ratemap_from_inter
 Example:
 
 ```powershell
-C:\Users\tadse\miniconda3\envs\odors\python.exe scripts/build_placefield_null_from_interim.py `
+C:\Users\tadse\miniconda3\envs\odors\python.exe scripts/pipelines/build_placefield_null_from_interim.py `
   --interim_root data/interim `
   --out_root results/placefield_null `
-  --null_method random `
+  --run_id pfnull_cshift_sm2p5_p0p01 `
+  --null_method circular_shift `
+  --sm_alpha 0.01 `
   --nb_rep 1000 `
   --save_ssi_null `
   --max_cells 25 `
@@ -108,9 +122,9 @@ C:\Users\tadse\miniconda3\envs\odors\python.exe scripts/build_placefield_null_fr
 
 ## Plot Putative Place Cells
 
-`scripts/plot_putative_pcells_from_ssi.py`:
+`scripts/reports/plot_putative_pcells_from_ssi.py`:
 
-- reads `results/placefield_null/ssi_classification.csv`
+- reads `<pfnull_run_dir>/ssi_classification.csv`
 - selects putative place cells with `p_value < sm_alpha`
 - loads observed maps from each session `*_pfnull.npz` (so `smooth_sigma_bins` and `xbin_rem` match bootstrap)
 - saves one figure per condition for each selected cell:
@@ -141,9 +155,9 @@ C:\Users\tadse\miniconda3\envs\odors\python.exe scripts/build_placefield_null_fr
 Example:
 
 ```powershell
-C:\Users\tadse\miniconda3\envs\odors\python.exe scripts/plot_putative_pcells_from_ssi.py `
-  --classification_csv results/placefield_null/ssi_classification.csv `
-  --pfnull_root results/placefield_null `
+C:\Users\tadse\miniconda3\envs\odors\python.exe scripts/reports/plot_putative_pcells_from_ssi.py `
+  --classification_csv results/placefield_null/<RUN_ID>/ssi_classification.csv `
+  --pfnull_root results/placefield_null/<RUN_ID> `
   --out_root results/figures/putative_pcells `
   --sm_alpha 0.01
 ```

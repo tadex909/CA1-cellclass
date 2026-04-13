@@ -1,0 +1,19 @@
+{
+  "inputs": {
+    "compare_dir": "results\\tables\\pf_npz_compare\\random_poisson_vs_circular_shift",
+    "disagreement_csv": "results\\tables\\pf_npz_compare\\random_poisson_vs_circular_shift\\disagreement_rows.csv",
+    "ratemap_root": "results\\ratemap",
+    "max_rows": 0,
+    "heatmap_percentile": 99.0
+  },
+  "counts": {
+    "n_rows_requested": 330,
+    "n_plotted": 330,
+    "n_exists_skip": 0,
+    "n_missing_or_errors": 0,
+    "n_class_pf_a_no_pf_b": 272,
+    "n_class_no_pf_a_pf_b": 58,
+    "n_class_other": 0
+  },
+  "out_dir": "results\\figures\\pf_method_disagreement_maps\\random_poisson_vs_circular_shift"
+}

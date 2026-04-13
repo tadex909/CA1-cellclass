@@ -1,0 +1,242 @@
+[
+  {
+    "name": "P15_16",
+    "path": "results\\P15_16",
+    "category": "datasets",
+    "subcategory": "age_group",
+    "n_files": 5,
+    "size_mb": 0.141765
+  },
+  {
+    "name": "P16-18",
+    "path": "results\\P16-18",
+    "category": "datasets",
+    "subcategory": "age_group",
+    "n_files": 5,
+    "size_mb": 0.220983
+  },
+  {
+    "name": "P17_18",
+    "path": "results\\P17_18",
+    "category": "datasets",
+    "subcategory": "age_group",
+    "n_files": 5,
+    "size_mb": 0.197322
+  },
+  {
+    "name": "P19-21",
+    "path": "results\\P19-21",
+    "category": "datasets",
+    "subcategory": "age_group",
+    "n_files": 5,
+    "size_mb": 0.28364
+  },
+  {
+    "name": "P19_20",
+    "path": "results\\P19_20",
+    "category": "datasets",
+    "subcategory": "age_group",
+    "n_files": 5,
+    "size_mb": 0.191104
+  },
+  {
+    "name": "P21_22",
+    "path": "results\\P21_22",
+    "category": "datasets",
+    "subcategory": "age_group",
+    "n_files": 5,
+    "size_mb": 0.2379
+  },
+  {
+    "name": "P22-24",
+    "path": "results\\P22-24",
+    "category": "datasets",
+    "subcategory": "age_group",
+    "n_files": 5,
+    "size_mb": 0.229148
+  },
+  {
+    "name": "P23_24",
+    "path": "results\\P23_24",
+    "category": "datasets",
+    "subcategory": "age_group",
+    "n_files": 5,
+    "size_mb": 0.175604
+  },
+  {
+    "name": "P25",
+    "path": "results\\P25",
+    "category": "datasets",
+    "subcategory": "age_group",
+    "n_files": 5,
+    "size_mb": 0.135715
+  },
+  {
+    "name": "V100",
+    "path": "results\\V100",
+    "category": "datasets",
+    "subcategory": "mouse",
+    "n_files": 0,
+    "size_mb": 0.0
+  },
+  {
+    "name": "VS116",
+    "path": "results\\VS116",
+    "category": "datasets",
+    "subcategory": "mouse",
+    "n_files": 5,
+    "size_mb": 0.066848
+  },
+  {
+    "name": "VS12",
+    "path": "results\\VS12",
+    "category": "datasets",
+    "subcategory": "mouse",
+    "n_files": 5,
+    "size_mb": 0.054073
+  },
+  {
+    "name": "VS15",
+    "path": "results\\VS15",
+    "category": "datasets",
+    "subcategory": "mouse",
+    "n_files": 5,
+    "size_mb": 0.068781
+  },
+  {
+    "name": "VS52",
+    "path": "results\\VS52",
+    "category": "datasets",
+    "subcategory": "mouse",
+    "n_files": 0,
+    "size_mb": 0.0
+  },
+  {
+    "name": "feature_set_experiments",
+    "path": "results\\feature_set_experiments",
+    "category": "models",
+    "subcategory": "analysis_outputs",
+    "n_files": 3,
+    "size_mb": 0.019029
+  },
+  {
+    "name": "model_selection",
+    "path": "results\\model_selection",
+    "category": "models",
+    "subcategory": "analysis_outputs",
+    "n_files": 25,
+    "size_mb": 0.233654
+  },
+  {
+    "name": "stability",
+    "path": "results\\stability",
+    "category": "models",
+    "subcategory": "analysis_outputs",
+    "n_files": 51,
+    "size_mb": 1.811661
+  },
+  {
+    "name": "type_u_comparison",
+    "path": "results\\type_u_comparison",
+    "category": "models",
+    "subcategory": "analysis_outputs",
+    "n_files": 14,
+    "size_mb": 0.573851
+  },
+  {
+    "name": "type_u_comparison_few",
+    "path": "results\\type_u_comparison_few",
+    "category": "models",
+    "subcategory": "analysis_outputs",
+    "n_files": 14,
+    "size_mb": 0.622171
+  },
+  {
+    "name": "type_u_comparison_smallfeat",
+    "path": "results\\type_u_comparison_smallfeat",
+    "category": "models",
+    "subcategory": "analysis_outputs",
+    "n_files": 38,
+    "size_mb": 0.68325
+  },
+  {
+    "name": "type_u_comparison_valero_feats",
+    "path": "results\\type_u_comparison_valero_feats",
+    "category": "models",
+    "subcategory": "analysis_outputs",
+    "n_files": 266,
+    "size_mb": 32.326683
+  },
+  {
+    "name": "type_u_comparison_valero_feats_3",
+    "path": "results\\type_u_comparison_valero_feats_3",
+    "category": "models",
+    "subcategory": "analysis_outputs",
+    "n_files": 139,
+    "size_mb": 31.382992
+  },
+  {
+    "name": "type_u_comparison_valero_feats_log",
+    "path": "results\\type_u_comparison_valero_feats_log",
+    "category": "models",
+    "subcategory": "analysis_outputs",
+    "n_files": 269,
+    "size_mb": 33.760133
+  },
+  {
+    "name": "type_u_comparison_valero_feats_log_vfr",
+    "path": "results\\type_u_comparison_valero_feats_log_vfr",
+    "category": "models",
+    "subcategory": "analysis_outputs",
+    "n_files": 259,
+    "size_mb": 32.08758
+  },
+  {
+    "name": "figures",
+    "path": "results\\figures",
+    "category": "placefields",
+    "subcategory": "session_outputs",
+    "n_files": 4436,
+    "size_mb": 924.234112
+  },
+  {
+    "name": "placefield_null",
+    "path": "results\\placefield_null",
+    "category": "placefields",
+    "subcategory": "session_outputs",
+    "n_files": 67,
+    "size_mb": 36.62754
+  },
+  {
+    "name": "placefield_null_random_2p5",
+    "path": "results\\placefield_null_random_2p5",
+    "category": "placefields",
+    "subcategory": "session_outputs",
+    "n_files": 67,
+    "size_mb": 37.150168
+  },
+  {
+    "name": "placefield_null_smoke_session",
+    "path": "results\\placefield_null_smoke_session",
+    "category": "placefields",
+    "subcategory": "session_outputs",
+    "n_files": 3,
+    "size_mb": 0.206179
+  },
+  {
+    "name": "ratemap",
+    "path": "results\\ratemap",
+    "category": "placefields",
+    "subcategory": "session_outputs",
+    "n_files": 66,
+    "size_mb": 51.595643
+  },
+  {
+    "name": "tables",
+    "path": "results\\tables",
+    "category": "reports",
+    "subcategory": "tables",
+    "n_files": 21,
+    "size_mb": 1.963172
+  }
+]

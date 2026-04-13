@@ -3,7 +3,8 @@
 Convert MATLAB files to compressed NPZ files.
 
 Supported modes:
-1) ratemap  -> expects *_Ratemap*.mat and exports `allcel` (+ selected `allpf`).
+1) ratemap  -> expects *_Ratemap*.mat and exports `allcel` (+ selected `allpf`)
+               and, when present, also exports `pf` to a sibling *_pf.npz.
 2) trajdata -> expects *_TrajData*.mat and exports only `Traj` fields.
 """
 
@@ -90,7 +91,7 @@ def parse_csv_list(raw: str | None) -> list[str]:
 # MATLAB loading helpers
 # -------------------------
 
-def load_mat_file(mat_path: Path) -> Dict[str, Any]:
+def load_mat_file(mat_path: Path, variable_names: list[str] | None = None) -> Dict[str, Any]:
     """
     Loads MATLAB .mat into a Python dict.
     Supports v7.2 (scipy.io.loadmat) and optionally v7.3 (mat73).
@@ -99,7 +100,13 @@ def load_mat_file(mat_path: Path) -> Dict[str, Any]:
         from scipy.io import loadmat
         from scipy.io.matlab import mat_struct  # type: ignore
 
-        md = loadmat(mat_path, squeeze_me=True, struct_as_record=False)
+        load_kwargs: Dict[str, Any] = {
+            "squeeze_me": True,
+            "struct_as_record": False,
+        }
+        if variable_names:
+            load_kwargs["variable_names"] = variable_names
+        md = loadmat(mat_path, **load_kwargs)
         md = {k: v for k, v in md.items() if not k.startswith("__")}
 
         def _convert(x: Any) -> Any:
@@ -121,7 +128,11 @@ def load_mat_file(mat_path: Path) -> Dict[str, Any]:
     try:
         import mat73  # type: ignore
 
+        # mat73 may not support selective variable loading across versions.
         md = mat73.loadmat(str(mat_path))
+        if variable_names:
+            keep = set(variable_names)
+            md = {k: v for k, v in md.items() if k in keep}
         return md
     except Exception:
         if last_err is not None:
@@ -147,6 +158,13 @@ def extract_allcel(mat_dict: Dict[str, Any]) -> Dict[str, Any]:
 def extract_optional_struct(mat_dict: Dict[str, Any], names: tuple[str, ...]) -> Dict[str, Any] | None:
     for n in names:
         if n in mat_dict and isinstance(mat_dict[n], dict):
+            return mat_dict[n]
+    return None
+
+
+def extract_optional_value(mat_dict: Dict[str, Any], names: tuple[str, ...]) -> Any | None:
+    for n in names:
+        if n in mat_dict:
             return mat_dict[n]
     return None
 
@@ -203,6 +221,22 @@ def traj_to_records(traj_obj: Any) -> list[dict[str, Any]]:
     raise TypeError("Unexpected Traj format. Expected dict or array/list of dict records.")
 
 
+def struct_to_records(struct_obj: Any, struct_name: str = "struct") -> list[dict[str, Any]]:
+    if isinstance(struct_obj, dict):
+        return [struct_obj]
+    if isinstance(struct_obj, (list, tuple)):
+        out = [x for x in struct_obj if isinstance(x, dict)]
+        if out:
+            return out
+    if isinstance(struct_obj, np.ndarray) and struct_obj.dtype == object:
+        out = [x for x in struct_obj.ravel() if isinstance(x, dict)]
+        if out:
+            return out
+    raise TypeError(
+        f"Unexpected {struct_name} format. Expected dict or array/list of dict records."
+    )
+
+
 def pack_traj_field(field_name: str, values: list[Any]) -> tuple[np.ndarray | None, bool]:
     arrs: list[np.ndarray] = []
     for v in values:
@@ -245,6 +279,17 @@ def build_out_path(info: SessionInfo, out_root: Path, mode: str) -> Path:
     return out_dir / f"{safe_filename(info.session_name)}_trajdata.npz"
 
 
+def build_pf_out_path(info: SessionInfo, out_root: Path, pf_tag: str | None = None) -> Path:
+    out_dir = out_root / safe_filename(info.mouse) / safe_filename(info.date)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    base = f"{safe_filename(info.session_name)}_pf"
+    if pf_tag:
+        tag = safe_filename(pf_tag).strip("_-")
+        if tag:
+            base = f"{base}_{tag}"
+    return out_dir / f"{base}.npz"
+
+
 def convert_one(
     mat_path: Path,
     out_root: Path,
@@ -252,6 +297,7 @@ def convert_one(
     include_spikes: bool,
     mode: str,
     traj_fields_req: list[str] | None = None,
+    pf_tag: str | None = None,
 ) -> Path:
     marker = "Ratemap" if mode == "ratemap" else "TrajData"
     if marker.lower() not in mat_path.name.lower():
@@ -259,10 +305,19 @@ def convert_one(
 
     info = parse_session_info(mat_path)
     out_path = build_out_path(info, out_root, mode=mode)
-    if out_path.exists() and not overwrite:
-        return out_path
+    skip_main_write = out_path.exists() and not overwrite
+    if skip_main_write:
+        if mode != "ratemap":
+            return out_path
+        pf_out_path = build_pf_out_path(info, out_root=out_root, pf_tag=pf_tag)
+        if pf_out_path.exists():
+            return out_path
 
-    md = load_mat_file(mat_path)
+    if mode == "ratemap":
+        # Load only what we need from potentially large/complex MAT files.
+        md = load_mat_file(mat_path, variable_names=["allcel", "allcell", "allpf", "pf"])
+    else:
+        md = load_mat_file(mat_path, variable_names=["Traj"])
     payload: Dict[str, Any] = {}
 
     meta: Dict[str, Any] = {
@@ -279,10 +334,11 @@ def convert_one(
     if mode == "ratemap":
         allcel = extract_allcel(md)
         allpf = extract_optional_struct(md, ("allpf",))
+        pf_raw = extract_optional_value(md, ("pf",))
         meta["allcel_fields"] = sorted(allcel.keys())
         meta["allpf_fields"] = sorted(allpf.keys()) if isinstance(allpf, dict) else None
+        meta["pf_present_in_mat"] = pf_raw is not None
         meta["include_spikes"] = include_spikes
-        payload["meta_json"] = np.array(json.dumps(meta), dtype=np.string_)
 
         for k, v in allcel.items():
             if (not include_spikes) and (k.lower() == "spikes"):
@@ -302,6 +358,50 @@ def convert_one(
                 payload["allpf__ispf_cxu"] = maybe_cast_int("ispf_cxu", v)
             else:
                 payload["allpf__ispf_cxu__json"] = np.array(json.dumps(v, default=str), dtype=np.string_)
+
+        pf_written = False
+        pf_out_path = build_pf_out_path(info, out_root=out_root, pf_tag=pf_tag)
+        if pf_raw is not None:
+            try:
+                pf_records = struct_to_records(pf_raw, struct_name="pf")
+                pf_fields = sorted({k for rec in pf_records for k in rec.keys()})
+                pf_meta: Dict[str, Any] = {
+                    "mouse": info.mouse,
+                    "date": info.date,
+                    "time": info.time,
+                    "session_name": info.session_name,
+                    "mode": "pf",
+                    "source_path": str(mat_path.resolve()),
+                    "source_mtime": mat_path.stat().st_mtime,
+                    "mat_keys": sorted(md.keys()),
+                    "pf_n_records": len(pf_records),
+                    "pf_fields": pf_fields,
+                    "pf_tag": (pf_tag or ""),
+                }
+                pf_payload: Dict[str, Any] = {
+                    "meta_json": np.array(json.dumps(pf_meta), dtype=np.string_)
+                }
+
+                for field in pf_fields:
+                    vals = [rec.get(field, np.nan) for rec in pf_records]
+                    packed, needs_json = pack_traj_field(field, vals)
+                    if (not needs_json) and packed is not None:
+                        pf_payload[f"pf__{field}"] = packed
+                    else:
+                        pf_payload[f"pf__{field}__json"] = np.array(
+                            json.dumps([to_jsonable(v) for v in vals], default=str),
+                            dtype=np.string_,
+                        )
+
+                np.savez_compressed(pf_out_path, **pf_payload)
+                pf_written = True
+                meta["pf_export_path"] = str(pf_out_path.resolve())
+            except Exception as e:
+                meta["pf_export_error"] = str(e)
+                pf_written = False
+
+        meta["pf_exported"] = pf_written
+        payload["meta_json"] = np.array(json.dumps(meta), dtype=np.string_)
 
     else:
         traj = extract_traj(md)
@@ -338,7 +438,8 @@ def convert_one(
                     dtype=np.string_,
                 )
 
-    np.savez_compressed(out_path, **payload)
+    if not skip_main_write:
+        np.savez_compressed(out_path, **payload)
     return out_path
 
 
@@ -391,6 +492,15 @@ def main() -> None:
             "Default uses a compact whitelist. Use 'all' to export every Traj field."
         ),
     )
+    ap.add_argument(
+        "--pf-tag",
+        type=str,
+        default="",
+        help=(
+            "Optional suffix tag for PF export file in ratemap mode. "
+            "Example: --pf-tag c writes <SESSION>_pf_c.npz."
+        ),
+    )
     ap.add_argument("--dry-run", action="store_true", help="Only print what would be converted.")
     args = ap.parse_args()
 
@@ -420,11 +530,14 @@ def main() -> None:
             traj_fields_req = parse_csv_list(args.traj_fields) or DEFAULT_TRAJ_FIELDS
 
     print(f"Found {len(mat_files)} file(s).")
+    pf_tag = args.pf_tag.strip() or None
     for p in mat_files:
         info = parse_session_info(p)
         out_path = build_out_path(info, out_root=out_root, mode=args.mode)
         if args.dry_run:
             print(f"[DRY] {p} -> {out_path}")
+            if args.mode == "ratemap":
+                print(f"[DRY] {p} -> {build_pf_out_path(info, out_root=out_root, pf_tag=pf_tag)}")
             continue
 
         try:
@@ -435,6 +548,7 @@ def main() -> None:
                 include_spikes=args.include_spikes,
                 mode=args.mode,
                 traj_fields_req=traj_fields_req,
+                pf_tag=pf_tag,
             )
             print(f"[OK]  {p.name} -> {outp}")
         except Exception as e:

@@ -1,8 +1,16 @@
 *.mat
 *.png
 *.csv
-#ignore everything in the results folder except for results/tables and results/figures
+__pycache__/
+*.pyc
+# ignore everything in results by default
 data/*
 results/*
+!results/README.md
 !results/tables
 !results/figures
+
+# MATLAB project metadata/cache
+resources/project/
+resources/project/**
+
