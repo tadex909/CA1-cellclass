@@ -10,7 +10,7 @@
 %%%%%%This one : X = all tracks aligned to the position (like old Geoff)
 
 %% SEE THIS PART : change of the signal to get position instead of distance
-asdsad
+
 %%%%I also added the speed threshold for the rate maps, you didn't have it
 %%%For me it works but I was at 100Hz but normally here it should work,
 %%%just do a test first. 
