@@ -2,15 +2,23 @@
 *.png
 *.csv
 __pycache__/
+**/__pycache__/
 *.pyc
+*.pyo
+*.pyd
+.ipynb_checkpoints/
+.pytest_cache/
+*.egg-info/
+build/
+dist/
+# local scratch exports
+path/
 # ignore everything in results by default
 data/*
 results/*
+!data/README.md
 !results/README.md
-!results/tables
-!results/figures
 
 # MATLAB project metadata/cache
 resources/project/
 resources/project/**
-
