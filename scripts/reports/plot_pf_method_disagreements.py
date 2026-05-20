@@ -73,12 +73,12 @@ def cue_layout_for_condition(name: str | None) -> CueLayout | None:
     if cname in {"POM", "POMB"}:
         return CueLayout(
             name=cname,
-            cue_rich=base["cue_rich"],
-            cue_poor=base["cue_poor"],
-            object_zone=base["object_zone"],
+            cue_rich=(13.0, 28.0),
+            cue_poor=(28.0, 57.0),
+            object_zone=(57.0, 96.0),
             object_centers=(20.0, 64.0, 88.0),
-            moved_object_span=(57.0, 72.0),
-            note="Moved second object",
+            moved_object_span=None,
+            note=None,
         )
     if cname == "PNO":
         return CueLayout(

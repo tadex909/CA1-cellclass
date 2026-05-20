@@ -49,7 +49,7 @@ This README reflects the current state of:
 Example:
 
 ```powershell
-C:\Users\tadse\miniconda3\envs\odors\python.exe src/cellclass/mat_to_npz.py `
+python src/cellclass/mat_to_npz.py `
   --mode trajdata `
   --input data/raw/trajdata `
   --output data/interim `
@@ -68,7 +68,7 @@ C:\Users\tadse\miniconda3\envs\odors\python.exe src/cellclass/mat_to_npz.py `
 Example:
 
 ```powershell
-C:\Users\tadse\miniconda3\envs\odors\python.exe scripts/pipelines/build_ratemap_from_interim.py `
+python scripts/pipelines/build_ratemap_from_interim.py `
   --interim_root data/interim `
   --out_root results/ratemap `
   --run_id ratemap_sm2p8_xrem10 `
@@ -108,7 +108,7 @@ C:\Users\tadse\miniconda3\envs\odors\python.exe scripts/pipelines/build_ratemap_
 Example:
 
 ```powershell
-C:\Users\tadse\miniconda3\envs\odors\python.exe scripts/pipelines/build_placefield_null_from_interim.py `
+python scripts/pipelines/build_placefield_null_from_interim.py `
   --interim_root data/interim `
   --out_root results/placefield_null `
   --run_id pfnull_cshift_sm2p5_p0p01 `
@@ -155,7 +155,7 @@ C:\Users\tadse\miniconda3\envs\odors\python.exe scripts/pipelines/build_placefie
 Example:
 
 ```powershell
-C:\Users\tadse\miniconda3\envs\odors\python.exe scripts/reports/plot_putative_pcells_from_ssi.py `
+python scripts/reports/plot_putative_pcells_from_ssi.py `
   --classification_csv results/placefield_null/<RUN_ID>/ssi_classification.csv `
   --pfnull_root results/placefield_null/<RUN_ID> `
   --out_root results/figures/putative_pcells `

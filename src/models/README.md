@@ -43,7 +43,7 @@ For each age group:
 Run from repository root:
 
 ```powershell
-C:\Users\tadse\miniconda3\envs\odors\python.exe src/models/fitting.py `
+python src/models/fitting.py `
   --results_root results `
   --out_root results/model_selection `
   --subset_mode leave_one_out `
@@ -99,7 +99,7 @@ Given your current sample sizes (roughly `P25` smallest, `P17_18`/`P23_24` large
 Suggested baseline run:
 
 ```powershell
-C:\Users\tadse\miniconda3\envs\odors\python.exe src/models/fitting.py `
+python src/models/fitting.py `
   --results_root results `
   --out_root results/model_selection `
   --subset_mode leave_one_out `
@@ -112,7 +112,7 @@ C:\Users\tadse\miniconda3\envs\odors\python.exe src/models/fitting.py `
 For a stricter stability pass:
 
 ```powershell
-C:\Users\tadse\miniconda3\envs\odors\python.exe src/models/fitting.py `
+python src/models/fitting.py `
   --results_root results `
   --out_root results/model_selection_strict `
   --subset_mode leave_one_out `
@@ -139,7 +139,7 @@ What it does:
 Example:
 
 ```powershell
-C:\Users\tadse\miniconda3\envs\odors\python.exe src/models/compare_type_u.py `
+python src/models/compare_type_u.py `
   --results_root results `
   --out_root results/type_u_comparison `
   --n_init 10

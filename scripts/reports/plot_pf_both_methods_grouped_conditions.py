@@ -10,6 +10,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+PLOT_X_MIN = 0.0
+PLOT_X_MAX = 100.0
+HEATMAP_CMAP = "magma"
+
 
 @dataclass(frozen=True)
 class CueLayout:
@@ -36,6 +40,7 @@ class DirectionPlotData:
     direction_label: str
     trial_indices_0b: np.ndarray
     original_condition_counts: tuple[tuple[str, int], ...]
+    condition_blocks: tuple[tuple[str, int, int], ...]
     heat: np.ndarray
     mean_raw: np.ndarray
     mean_sm: np.ndarray
@@ -71,12 +76,12 @@ PNO_CUE_LAYOUT = CueLayout(
 
 POM_CUE_LAYOUT = CueLayout(
     name="pom_family",
-    cue_rich=(13.0, 43.0),
-    cue_poor=(43.0, 81.0),
-    object_zone=(81.0, 96.0),
+    cue_rich=(13.0, 28.0),
+    cue_poor=(28.0, 57.0),
+    object_zone=(57.0, 96.0),
     object_centers=(20.0, 64.0, 88.0),
-    moved_object_span=(57.0, 72.0),
-    note="Moved second object",
+    moved_object_span=None,
+    note=None,
 )
 
 TRIAL_FAMILIES: tuple[TrialFamily, ...] = (
@@ -245,6 +250,7 @@ def load_rmap_payload(rmap_path: Path) -> dict[str, Any]:
         req = [
             "cell_ids",
             "xbin_centers",
+            "xbin_edges",
             "idcond_t",
             "rmap__fr_tx_ux",
             "rmap__fr_s_tx_ux",
@@ -256,6 +262,7 @@ def load_rmap_payload(rmap_path: Path) -> dict[str, Any]:
         return {
             "cell_ids": z["cell_ids"].astype(np.int64, copy=False),
             "x": z["xbin_centers"].astype(np.float64, copy=False),
+            "x_edges": z["xbin_edges"].astype(np.float64, copy=False),
             "idcond_t": z["idcond_t"].astype(np.int64, copy=False),
             "fr_tx": z["rmap__fr_tx_ux"].astype(np.float64, copy=False),
             "fr_s_tx": z["rmap__fr_s_tx_ux"].astype(np.float64, copy=False),
@@ -355,9 +362,9 @@ def add_cue_overlays(
     *,
     add_labels: bool,
 ) -> None:
-    ax.axvspan(layout.cue_rich[0], layout.cue_rich[1], color="#f4c095", alpha=0.22, zorder=0)
-    ax.axvspan(layout.cue_poor[0], layout.cue_poor[1], color="#d7ebba", alpha=0.18, zorder=0)
-    ax.axvspan(layout.object_zone[0], layout.object_zone[1], color="#a8cbe6", alpha=0.22, zorder=0)
+    ax.axvspan(layout.cue_rich[0], layout.cue_rich[1], color="#f4c095", alpha=0.22, zorder=1)
+    ax.axvspan(layout.cue_poor[0], layout.cue_poor[1], color="#d7ebba", alpha=0.18, zorder=1)
+    ax.axvspan(layout.object_zone[0], layout.object_zone[1], color="#a8cbe6", alpha=0.22, zorder=1)
     if layout.moved_object_span is not None:
         ax.axvspan(
             layout.moved_object_span[0],
@@ -418,6 +425,35 @@ def format_condition_counts(counts: tuple[tuple[str, int], ...]) -> str:
     return " | ".join(f"{name}={count}" for name, count in counts)
 
 
+def add_condition_block_annotations(
+    ax: plt.Axes,
+    *,
+    x_min: float,
+    x_max: float,
+    condition_blocks: tuple[tuple[str, int, int], ...],
+) -> None:
+    if not condition_blocks:
+        return
+
+    x_text = float(x_min) + (float(x_max) - float(x_min)) * 0.012
+    for i, (name, start_row_1b, end_row_1b) in enumerate(condition_blocks):
+        if i > 0:
+            y_sep = float(start_row_1b) - 0.5
+            ax.axhline(y_sep, color="white", linewidth=1.2, alpha=0.9, zorder=4)
+        y_mid = 0.5 * (float(start_row_1b) + float(end_row_1b))
+        ax.text(
+            x_text,
+            y_mid,
+            str(name),
+            ha="left",
+            va="center",
+            fontsize=7.5,
+            color="black",
+            bbox={"facecolor": "white", "alpha": 0.72, "edgecolor": "none", "pad": 1.5},
+            zorder=5,
+        )
+
+
 def select_family_trials(trial_table: pd.DataFrame, family: TrialFamily, direction_key: str) -> pd.DataFrame:
     order = {name: i for i, name in enumerate(family.member_conditions)}
     keep = trial_table["condition_canon"].isin(family.member_conditions) & (trial_table["wb"] == direction_key)
@@ -450,6 +486,7 @@ def build_direction_plot_data(
             direction_label=direction_label,
             trial_indices_0b=np.empty((0,), dtype=np.int64),
             original_condition_counts=tuple(),
+            condition_blocks=tuple(),
             heat=np.empty((0, n_bins), dtype=np.float64),
             mean_raw=np.full(n_bins, np.nan, dtype=np.float64),
             mean_sm=np.full(n_bins, np.nan, dtype=np.float64),
@@ -461,10 +498,15 @@ def build_direction_plot_data(
     mean_sm = np.asarray(np.nanmean(fr_s_tx_u[idx, :], axis=0), dtype=np.float64)
 
     counts: list[tuple[str, int]] = []
+    blocks: list[tuple[str, int, int]] = []
+    row_start = 1
     for cond in family.member_conditions:
         n = int((subset["condition_canon"] == cond).sum())
         if n > 0:
-            counts.append((pretty_condition_name(cond), n))
+            pretty = pretty_condition_name(cond)
+            counts.append((pretty, n))
+            blocks.append((pretty, row_start, row_start + n - 1))
+            row_start += n
 
     if direction_key == "B":
         heat = heat[:, ::-1]
@@ -476,6 +518,7 @@ def build_direction_plot_data(
         direction_label=direction_label,
         trial_indices_0b=idx,
         original_condition_counts=tuple(counts),
+        condition_blocks=tuple(blocks),
         heat=heat,
         mean_raw=mean_raw,
         mean_sm=mean_sm,
@@ -493,6 +536,7 @@ def save_family_plot(
     cell_id: float,
     matched_by: str,
     x: np.ndarray,
+    x_edges: np.ndarray,
     fr_tx_u: np.ndarray,
     fr_s_tx_u: np.ndarray,
     trial_table: pd.DataFrame,
@@ -540,14 +584,30 @@ def save_family_plot(
     if (not np.isfinite(heat_vmax)) or (heat_vmax <= 0):
         heat_vmax = 1.0
 
-    fig, axes = plt.subplots(2, 2, figsize=(13.6, 7.9), squeeze=False, sharex="col")
+    fig = plt.figure(figsize=(13.6, 7.9))
+    gs = fig.add_gridspec(
+        2,
+        4,
+        width_ratios=[1.0, 0.026, 1.0, 0.026],
+        height_ratios=[1.0, 1.0],
+        wspace=0.08,
+        hspace=0.22,
+    )
+    ax_heat_left = fig.add_subplot(gs[0, 0])
+    ax_heat_right = fig.add_subplot(gs[0, 2])
+    ax_mean_left = fig.add_subplot(gs[1, 0], sharex=ax_heat_left)
+    ax_mean_right = fig.add_subplot(gs[1, 2], sharex=ax_heat_right)
+    cax_left = fig.add_subplot(gs[0, 1])
+    cax_right = fig.add_subplot(gs[0, 3])
+    axes = ((ax_heat_left, ax_heat_right), (ax_mean_left, ax_mean_right))
+    caxes = (cax_left, cax_right)
     total_trials = 0
     for col, view in enumerate(directions):
-        ax_heat = axes[0, col]
-        ax_mean = axes[1, col]
+        ax_heat = axes[0][col]
+        ax_mean = axes[1][col]
+        cax = caxes[col]
         total_trials += int(view.trial_indices_0b.size)
 
-        add_cue_overlays(ax_heat, family.cue_layout, add_labels=False)
         if view.trial_indices_0b.size == 0:
             ax_heat.set_xlim(float(x[0]), float(x[-1]))
             ax_heat.set_ylim(0.0, 1.0)
@@ -569,10 +629,10 @@ def save_family_plot(
                 aspect="auto",
                 origin="lower",
                 interpolation="nearest",
-                extent=[float(x[0]), float(x[-1]), 1, int(view.trial_indices_0b.size)],
+                extent=[float(x_edges[0]), float(x_edges[-1]), 0.5, float(int(view.trial_indices_0b.size) + 0.5)],
                 vmin=0.0,
                 vmax=float(heat_vmax),
-                cmap="viridis",
+                cmap=HEATMAP_CMAP,
             )
             ax_heat.set_title(
                 f"{view.direction_label} | n_trials={int(view.trial_indices_0b.size)}",
@@ -580,7 +640,18 @@ def save_family_plot(
             )
             ax_heat.set_xlabel("Position")
             ax_heat.set_ylabel("Trial")
-            fig.colorbar(im, ax=ax_heat, fraction=0.046, pad=0.04).set_label("FR (smoothed)")
+        add_cue_overlays(ax_heat, family.cue_layout, add_labels=False)
+        ax_heat.set_xlim(PLOT_X_MIN, PLOT_X_MAX)
+        if view.trial_indices_0b.size > 0:
+            add_condition_block_annotations(
+                ax_heat,
+                x_min=float(x[0]),
+                x_max=float(x[-1]),
+                condition_blocks=view.condition_blocks,
+            )
+            fig.colorbar(im, cax=cax).set_label("FR (smoothed)")
+        else:
+            cax.set_visible(False)
         ax_heat.text(
             0.01,
             0.98,
@@ -609,6 +680,7 @@ def save_family_plot(
         ax_mean.set_title(f"{view.direction_label} mean FR", fontsize=10)
         ax_mean.set_xlabel("Position")
         ax_mean.set_ylabel("FR")
+        ax_mean.set_xlim(PLOT_X_MIN, PLOT_X_MAX)
         ax_mean.set_ylim(bottom=0.0, top=y_upper * 1.05)
         ax_mean.grid(alpha=0.25)
         ax_mean.text(
@@ -644,7 +716,7 @@ def save_family_plot(
     fig.text(0.01, 0.01, info, fontsize=8, ha="left", va="bottom")
 
     out_png.parent.mkdir(parents=True, exist_ok=True)
-    fig.tight_layout(rect=[0, 0.03, 1, 0.95])
+    fig.subplots_adjust(left=0.06, right=0.97, bottom=0.10, top=0.88)
     fig.savefig(out_png, dpi=int(dpi), bbox_inches="tight")
     plt.close(fig)
     return int(directions[0].trial_indices_0b.size), int(directions[1].trial_indices_0b.size)
@@ -801,6 +873,7 @@ def main() -> None:
                     cell_id=cid,
                     matched_by=matched_by,
                     x=x,
+                    x_edges=payload["x_edges"],
                     fr_tx_u=fr_tx_u,
                     fr_s_tx_u=fr_s_tx_u,
                     trial_table=trial_table,

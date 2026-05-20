@@ -36,6 +36,37 @@ This repository has two main layers:
 
 ---
 
+## Dev Setup
+
+Start from an activated virtual environment or Conda environment.
+If `python` is not on your `PATH`, replace it below with your environment's interpreter path.
+
+1. Install the repo in editable mode
+
+```powershell
+python -m pip install -e .
+```
+
+2. Run the synthetic smoke tests
+
+```powershell
+python -m unittest discover -s tests -p "test_*.py"
+```
+
+3. Run the canonical scripts from repository root
+
+```powershell
+python scripts/pipelines/interim_to_processed.py --interim_root data/interim --processed_root data/processed --skip_existing
+```
+
+Notes:
+
+- The editable install is the supported dev setup for `cellclass` and `placefields`.
+- `python -m pip install -e .[dev]` is optional if you also want the extra dev tooling.
+- Generated outputs under `data/`, `results/`, and `path/` are treated as local artifacts by default.
+
+---
+
 ## What `cellclass` Does
 
 `cellclass` turns session-level spike/waveform data into processed per-neuron features.
