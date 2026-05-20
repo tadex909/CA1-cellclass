@@ -1,0 +1,47 @@
+{
+  "inputs": {
+    "compare_dir": "results\\tables\\pf_npz_compare\\random_poisson_vs_circular_shift",
+    "unit_summary_csv": "results\\tables\\pf_npz_compare\\random_poisson_vs_circular_shift\\unit_summary.csv",
+    "ratemap_root": "results\\ratemap",
+    "label_a": "random_poisson",
+    "label_b": "circular_shift",
+    "max_units": 3,
+    "heatmap_percentile": 99.0
+  },
+  "counts": {
+    "n_selected_units": 3,
+    "n_requested_families": 3,
+    "n_plotted": 3,
+    "n_exists_skip": 0,
+    "n_skip_no_trials_in_session": 6,
+    "n_missing_or_errors": 0
+  },
+  "families": [
+    {
+      "key": "object_standard",
+      "title": "PO / PO2 / PO3 / POnM",
+      "member_conditions": [
+        "PO",
+        "PO2",
+        "PO3",
+        "POnM"
+      ]
+    },
+    {
+      "key": "pno",
+      "title": "PNO",
+      "member_conditions": [
+        "PNO"
+      ]
+    },
+    {
+      "key": "pom_family",
+      "title": "POM / POMb",
+      "member_conditions": [
+        "POM",
+        "POMb"
+      ]
+    }
+  ],
+  "out_dir": "results\\figures\\pf_both_methods_grouped_conditions_preview\\random_poisson_vs_circular_shift"
+}
