@@ -1,5 +1,21 @@
 from .matlab_compat import ifreq_swap, matlab_1b_to_python_0b
 from .metrics import divide_with_nan, gaussian_kernel_1d, smooth_last_axis
+from .interim_io import (
+    SavedRatemapPack,
+    load_saved_ratemap_pack,
+    load_traj_condition_names,
+    subset_saved_ratemap_pack_cells,
+)
+from .cell_classification import (
+    filter_cell_ids_by_pred_type,
+    load_cell_classification_table,
+)
+from .cue_zones import (
+    CueZoneLayout,
+    complement_spans,
+    cue_zone_layout_for_condition,
+    label_xbin_centers_by_zone,
+)
 from .bootstrap import (
     NullBootstrapConfig,
     empirical_pval_cx,
@@ -21,7 +37,28 @@ from .pipeline import (
     build_ratemap_from_trials,
     normalize_x_to_100,
 )
-from .trials import TrialInfo, build_condway, build_trial_info_from_traj
+from .population_geometry import (
+    DisplacementProfile,
+    PopulationGeometryConfig,
+    PopulationGeometryGroupResult,
+    PopulationGeometrySessionResult,
+    ZoneDisplacementProfiles,
+    build_population_geometry_for_group,
+    build_population_geometry_from_saved_ratemap,
+    compute_condition_zone_displacement_profiles,
+    compute_displacement_profile,
+    compute_normalization_scales,
+    compute_zone_displacement_profiles,
+    decode_condway,
+    rebin_trial_maps,
+)
+from .trials import (
+    TrialInfo,
+    build_condway,
+    build_trial_info_from_traj,
+    canonical_condition_name,
+    condition_family_name,
+)
 
 __all__ = [
     "ifreq_swap",
@@ -29,6 +66,16 @@ __all__ = [
     "gaussian_kernel_1d",
     "smooth_last_axis",
     "divide_with_nan",
+    "SavedRatemapPack",
+    "load_saved_ratemap_pack",
+    "load_traj_condition_names",
+    "subset_saved_ratemap_pack_cells",
+    "load_cell_classification_table",
+    "filter_cell_ids_by_pred_type",
+    "CueZoneLayout",
+    "complement_spans",
+    "cue_zone_layout_for_condition",
+    "label_xbin_centers_by_zone",
     "NullBootstrapConfig",
     "simulate_null_fr_s_txrep",
     "empirical_pval_tx",
@@ -41,10 +88,25 @@ __all__ = [
     "empirical_pvalue_from_null",
     "RatemapConfig",
     "RatemapPack",
+    "DisplacementProfile",
+    "PopulationGeometryConfig",
+    "PopulationGeometryGroupResult",
+    "PopulationGeometrySessionResult",
+    "ZoneDisplacementProfiles",
     "TrialInfo",
     "normalize_x_to_100",
     "build_default_xbin",
     "build_condway",
     "build_trial_info_from_traj",
+    "canonical_condition_name",
+    "condition_family_name",
     "build_ratemap_from_trials",
+    "decode_condway",
+    "rebin_trial_maps",
+    "compute_displacement_profile",
+    "compute_zone_displacement_profiles",
+    "compute_condition_zone_displacement_profiles",
+    "compute_normalization_scales",
+    "build_population_geometry_for_group",
+    "build_population_geometry_from_saved_ratemap",
 ]

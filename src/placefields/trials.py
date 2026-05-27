@@ -7,6 +7,16 @@ import numpy as np
 from .matlab_compat import matlab_1b_to_python_0b
 
 
+CONDITION_FAMILY_MAP: dict[str, str] = {
+    "PO": "PO",
+    "PO2": "PO",
+    "PO3": "PO",
+    "PONM": "PO",
+    "POM": "POM",
+    "POMB": "POM",
+}
+
+
 @dataclass(frozen=True)
 class TrialInfo:
     """
@@ -23,6 +33,17 @@ class TrialInfo:
     condway: int
     start_idx_0b: int
     stop_idx_0b_exclusive: int
+
+
+def canonical_condition_name(name: str | None) -> str:
+    if name is None:
+        return ""
+    return str(name).strip().upper()
+
+
+def condition_family_name(name: str | None) -> str:
+    cname = canonical_condition_name(name)
+    return CONDITION_FAMILY_MAP.get(cname, cname)
 
 
 def build_condway(cond: np.ndarray, wb: np.ndarray) -> np.ndarray:
