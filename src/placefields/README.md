@@ -10,9 +10,11 @@ This README reflects the current state of:
 - `src/placefields/trials.py` (trial metadata builders)
 - `src/placefields/interim_io.py` (interim NPZ pairing/loading/saving helpers)
 - `src/placefields/pipeline.py` (ratemap builder)
+- `src/placefields/decoding.py` (Bayesian position decoder)
 - `src/placefields/bootstrap.py` (MATLAB-like null-map simulation + empirical p-values)
 - `src/placefields/ssi.py` (Spatial Selectivity Index + null-distribution p-values)
 - `scripts/pipelines/build_ratemap_from_interim.py` (session pairing + ratemap run)
+- `scripts/pipelines/build_bayesian_decoder_from_interim.py` (session-level Bayesian decoding)
 - `scripts/pipelines/build_placefield_null_from_interim.py` (session-level null bootstrap + p-values)
 
 ## Workflow
@@ -26,10 +28,14 @@ This README reflects the current state of:
 3. Build ratemaps by pairing files with the same session stem:
    - output (default): `results/ratemap/<RUN_ID>/<MOUSE>/<DATE>/<SESSION>_rmap.npz`
    - legacy output (with `--no_run_subdir`): `results/ratemap/<MOUSE>/<DATE>/<SESSION>_rmap.npz`
+4. Decode position from the same paired interim files:
+   - output (default): `results/position_decoding/<RUN_ID>/<MOUSE>/<DATE>/<SESSION>_bayes_decode.npz`
+   - aggregate summary: `results/position_decoding/<RUN_ID>/decoding_summary.csv`
 
 ## Run IDs And Run Configs
 
-`build_ratemap_from_interim.py` and `build_placefield_null_from_interim.py` support run-scoped output folders.
+`build_ratemap_from_interim.py`, `build_bayesian_decoder_from_interim.py`, and
+`build_placefield_null_from_interim.py` support run-scoped output folders.
 
 - By default:
   - each run writes to `<out_root>/<run_id>/...`
@@ -119,6 +125,59 @@ python scripts/pipelines/build_placefield_null_from_interim.py `
   --max_cells 25 `
   --min_speed 2.0
 ```
+
+## Build Bayesian Position Decoding Outputs
+
+`scripts/pipelines/build_bayesian_decoder_from_interim.py`:
+
+- reuses paired `*_allcel.npz` and `*_trajdata.npz` files
+- reconstructs session position/speed vectors and downsamples spike indices
+- uses non-overlapping 150 ms windows by default
+- performs leave-one-lap-out cross-validation within each condition-direction (`condway`) by default
+- supports `--decode_groupby condway|condition|global`
+  - `condway`: train separate maps for each condition and direction (default)
+  - `condition`: pool directions within each base condition
+  - `global`: pool all laps except the held-out lap
+- supports `--group_condition_families` to pool condition variants before decoding:
+  - `PO`, `PO2`, `PO3`, `PONM` -> `PO`
+  - `POM`, `POMB` -> `POM`
+  - with `--decode_groupby condway`, direction is still kept separate (`PO W`, `PO B`, etc.)
+- trains tuning curves from pooled training spike counts divided by pooled dwell
+- computes a memoryless Poisson Bayesian posterior over spatial bins
+- uses all active cells by default; optional `--cell_ids` and `--max_cells` limit the ensemble
+- reads condition names from `traj__condition` / `traj__condition__json` when present and records labels such as `PO W`
+- saves:
+  - `decode__posterior_wx`
+  - `decode__decoded_bin_w`, `decode__decoded_x_w`
+  - `decode__actual_bin_w`, `decode__actual_x_w`
+  - `decode__error_cm_w`
+  - `decode__prob_actual_w`
+  - `decode__trial_index_w`, `decode__condway_w`, `decode__condition_label_w`, `decode__train_group_w`, `decode__train_group_label_w`
+  - `decode__window_start_w`, `decode__window_stop_w`
+  - `decode__n_spikes_w`, `decode__n_train_laps_w`
+  - `run_index.csv`
+  - `decoding_summary.csv`
+
+Example:
+
+```powershell
+python scripts/pipelines/build_bayesian_decoder_from_interim.py `
+  --interim_root data/interim `
+  --out_root results/position_decoding `
+  --run_id bayes_tau150ms_bin2cm `
+  --decode_groupby condway `
+  --group_condition_families `
+  --tau_s 0.150 `
+  --bin_size_cm 2.0 `
+  --min_speed 2.0
+```
+
+Notes:
+
+- `--min_speed nan` disables speed filtering and allows sessions without exported speed.
+- Use `--decode_groupby global` as a pooled-map control against the default condition-direction decoder.
+- Theta/delta filtering is not implemented because the interim trajectory files do not expose that signal.
+- FRV decoding and drop-cell subset repeats are intentionally left for a later stage.
 
 ## Plot Putative Place Cells
 
@@ -259,6 +318,13 @@ Important:
   mirrors MATLAB default bin logic.
 - `build_ratemap_from_trials(...)`:
   builds all ratemap tensors (`*_tx`, `*_cx`, smoothed/unsmoothed).
+
+`src/placefields/decoding.py`:
+
+- `build_regular_xbin(position_x, bin_size_cm=2.0)`:
+  builds fixed-width spatial bins for decoder runs.
+- `decode_bayesian_position_from_trials(...)`:
+  runs leave-one-lap-out memoryless Bayesian position decoding.
 
 `src/placefields/bootstrap.py`:
 

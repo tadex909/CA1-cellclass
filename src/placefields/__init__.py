@@ -37,6 +37,13 @@ from .pipeline import (
     build_ratemap_from_trials,
     normalize_x_to_100,
 )
+from .decoding import (
+    BayesianDecoderConfig,
+    BayesianDecodingResult,
+    DecodeGroupBy,
+    build_regular_xbin,
+    decode_bayesian_position_from_trials,
+)
 from .population_geometry import (
     DisplacementProfile,
     PopulationGeometryConfig,
@@ -88,6 +95,9 @@ __all__ = [
     "empirical_pvalue_from_null",
     "RatemapConfig",
     "RatemapPack",
+    "BayesianDecoderConfig",
+    "BayesianDecodingResult",
+    "DecodeGroupBy",
     "DisplacementProfile",
     "PopulationGeometryConfig",
     "PopulationGeometryGroupResult",
@@ -96,11 +106,13 @@ __all__ = [
     "TrialInfo",
     "normalize_x_to_100",
     "build_default_xbin",
+    "build_regular_xbin",
     "build_condway",
     "build_trial_info_from_traj",
     "canonical_condition_name",
     "condition_family_name",
     "build_ratemap_from_trials",
+    "decode_bayesian_position_from_trials",
     "decode_condway",
     "rebin_trial_maps",
     "compute_displacement_profile",
