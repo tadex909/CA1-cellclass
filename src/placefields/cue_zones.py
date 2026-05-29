@@ -155,3 +155,51 @@ def label_xbin_centers_by_zone(
         in_span = np.isfinite(centers) & (centers >= float(start)) & (centers < float(end))
         labels[in_span] = rich_label
     return labels
+
+
+def zone_component_names_for_layout(
+    layout: CueZoneLayout,
+    *,
+    include_rich: bool = True,
+    include_poor: bool = True,
+) -> tuple[str, ...]:
+    names: list[str] = []
+    if include_rich:
+        names.extend(f"rich_{i + 1}" for i in range(len(layout.rich_spans)))
+    if include_poor:
+        names.extend(f"poor_{i + 1}" for i in range(len(layout.poor_spans)))
+    return tuple(names)
+
+
+def label_xbin_centers_by_zone_component(
+    xbin_centers: np.ndarray,
+    *,
+    layout: CueZoneLayout | None = None,
+    condition_name: str | None = "",
+    condition_family: str | None = "",
+    rich_prefix: str = "rich",
+    poor_prefix: str = "poor",
+) -> np.ndarray:
+    centers = np.asarray(xbin_centers, dtype=np.float64).ravel()
+    if layout is None:
+        layout = cue_zone_layout_for_condition(
+            condition_name,
+            condition_family=condition_family,
+        )
+
+    max_index = max(len(layout.rich_spans), len(layout.poor_spans), 1)
+    max_label_len = max(
+        1,
+        len(f"{rich_prefix}_{max_index}"),
+        len(f"{poor_prefix}_{max_index}"),
+    )
+    labels = np.full(centers.size, "", dtype=f"<U{max_label_len}")
+
+    for i, (start, end) in enumerate(layout.poor_spans, start=1):
+        in_span = np.isfinite(centers) & (centers >= float(start)) & (centers < float(end))
+        labels[in_span] = f"{poor_prefix}_{i}"
+
+    for i, (start, end) in enumerate(layout.rich_spans, start=1):
+        in_span = np.isfinite(centers) & (centers >= float(start)) & (centers < float(end))
+        labels[in_span] = f"{rich_prefix}_{i}"
+    return labels

@@ -7,7 +7,13 @@ from typing import Any, Mapping
 
 import numpy as np
 
-from .cue_zones import CueZoneLayout, cue_zone_layout_for_condition, label_xbin_centers_by_zone
+from .cue_zones import (
+    CueZoneLayout,
+    cue_zone_layout_for_condition,
+    label_xbin_centers_by_zone,
+    label_xbin_centers_by_zone_component,
+    zone_component_names_for_layout,
+)
 from .interim_io import SavedRatemapPack, subset_saved_ratemap_pack_cells
 from .trials import condition_family_name
 
@@ -556,6 +562,44 @@ def compute_condition_zone_displacement_profiles(
         zone_labels_k=zone_labels,
         xbin_centers=xbin_centers,
         valid_mask_k=valid_mask_k,
+        max_lag_bins=max_lag_bins,
+        layout=layout,
+    )
+
+
+def compute_condition_component_displacement_profiles(
+    similarity_kk: np.ndarray,
+    *,
+    xbin_centers: np.ndarray,
+    valid_mask_k: np.ndarray | None = None,
+    condition_name: str | None = "",
+    condition_family: str | None = "",
+    max_lag_bins: int | None = None,
+    include_rich: bool = True,
+    include_poor: bool = True,
+) -> ZoneDisplacementProfiles:
+    if not include_rich and not include_poor:
+        raise ValueError("At least one of include_rich or include_poor must be True")
+
+    layout = cue_zone_layout_for_condition(
+        condition_name,
+        condition_family=condition_family,
+    )
+    zone_labels = label_xbin_centers_by_zone_component(
+        xbin_centers,
+        layout=layout,
+    )
+    zone_names = zone_component_names_for_layout(
+        layout,
+        include_rich=include_rich,
+        include_poor=include_poor,
+    )
+    return compute_zone_displacement_profiles(
+        similarity_kk,
+        zone_labels_k=zone_labels,
+        xbin_centers=xbin_centers,
+        valid_mask_k=valid_mask_k,
+        zone_names=zone_names,
         max_lag_bins=max_lag_bins,
         layout=layout,
     )

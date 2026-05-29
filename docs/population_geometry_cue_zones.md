@@ -12,6 +12,8 @@ population-geometry summaries on the normalized `0-100` linear track.
 - Cue-poor spans are defined as the complement of cue-rich spans plus excluded spans on the track.
 - For lag-profile analyses, bins are usually labeled by the zone containing the
   bin center.
+- Component-wise labels are also available when the contiguous patches should be
+  kept separate, for example `rich_1`, `rich_2`, `poor_1`, `poor_2`, and so on.
 
 Canonical excluded span for all condition families:
 
@@ -43,6 +45,14 @@ The resulting cue-poor spans are:
 - `43` to `81`
 - `96` to `100`
 
+Component labels for `PO` therefore map to:
+
+- `rich_1`: `13` to `43`
+- `rich_2`: `81` to `96`
+- `poor_1`: `10` to `13`
+- `poor_2`: `43` to `81`
+- `poor_3`: `96` to `100`
+
 ## POM Family
 
 The `POM` family includes:
@@ -69,6 +79,14 @@ The resulting cue-poor spans are:
 - `28` to `57`
 - `96` to `100`
 
+Component labels for `POM` therefore map to:
+
+- `rich_1`: `13` to `28`
+- `rich_2`: `57` to `96`
+- `poor_1`: `10` to `13`
+- `poor_2`: `28` to `57`
+- `poor_3`: `96` to `100`
+
 ## PNO
 
 `PNO` has no objects and therefore no cue-rich spans.
@@ -89,6 +107,8 @@ This allows summaries such as:
 - `g_rich(Δx)`
 - `g_poor(Δx)`
 - `g_no(Δx)` on the homologous cue-defined windows
+- `g_rich_1_within(Δx)` and `g_rich_2_within(Δx)` when the two cue-rich patches
+  should be compared separately
 
 ## Code Source
 

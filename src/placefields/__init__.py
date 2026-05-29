@@ -15,6 +15,8 @@ from .cue_zones import (
     complement_spans,
     cue_zone_layout_for_condition,
     label_xbin_centers_by_zone,
+    label_xbin_centers_by_zone_component,
+    zone_component_names_for_layout,
 )
 from .bootstrap import (
     NullBootstrapConfig,
@@ -52,6 +54,7 @@ from .population_geometry import (
     ZoneDisplacementProfiles,
     build_population_geometry_for_group,
     build_population_geometry_from_saved_ratemap,
+    compute_condition_component_displacement_profiles,
     compute_condition_zone_displacement_profiles,
     compute_displacement_profile,
     compute_normalization_scales,
@@ -83,6 +86,8 @@ __all__ = [
     "complement_spans",
     "cue_zone_layout_for_condition",
     "label_xbin_centers_by_zone",
+    "label_xbin_centers_by_zone_component",
+    "zone_component_names_for_layout",
     "NullBootstrapConfig",
     "simulate_null_fr_s_txrep",
     "empirical_pval_tx",
@@ -117,6 +122,7 @@ __all__ = [
     "rebin_trial_maps",
     "compute_displacement_profile",
     "compute_zone_displacement_profiles",
+    "compute_condition_component_displacement_profiles",
     "compute_condition_zone_displacement_profiles",
     "compute_normalization_scales",
     "build_population_geometry_for_group",

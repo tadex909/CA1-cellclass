@@ -12,6 +12,7 @@ import pandas as pd
 
 from placefields import (
     complement_spans,
+    compute_condition_component_displacement_profiles,
     compute_condition_zone_displacement_profiles,
     compute_displacement_profile,
     PopulationGeometryConfig,
@@ -23,9 +24,11 @@ from placefields import (
     decode_condway,
     filter_cell_ids_by_pred_type,
     label_xbin_centers_by_zone,
+    label_xbin_centers_by_zone_component,
     load_cell_classification_table,
     load_saved_ratemap_pack,
     rebin_trial_maps,
+    zone_component_names_for_layout,
 )
 
 
@@ -142,6 +145,20 @@ class PopulationGeometryTest(unittest.TestCase):
             np.array(["", "rich", "poor", "rich"], dtype=np.str_),
         )
 
+    def test_label_xbin_centers_by_zone_component_splits_contiguous_spans(self) -> None:
+        layout = cue_zone_layout_for_condition("PO2")
+        self.assertEqual(
+            zone_component_names_for_layout(layout),
+            ("rich_1", "rich_2", "poor_1", "poor_2", "poor_3"),
+        )
+
+        centers = np.array([5.0, 12.0, 20.0, 50.0, 90.0, 97.0], dtype=np.float64)
+        labels = label_xbin_centers_by_zone_component(centers, layout=layout)
+        np.testing.assert_array_equal(
+            labels,
+            np.array(["", "poor_1", "rich_1", "poor_2", "rich_2", "poor_3"], dtype=np.str_),
+        )
+
     def test_pno_layout_excludes_first_track_segment_from_zone_labels(self) -> None:
         layout = cue_zone_layout_for_condition("PNO")
         self.assertEqual(layout.excluded_spans, ((0.0, 10.0),))
@@ -240,6 +257,42 @@ class PopulationGeometryTest(unittest.TestCase):
             profiles.zone_labels_k,
             np.array(["rich", "poor", "rich"], dtype=np.str_),
         )
+
+    def test_condition_component_profiles_return_separate_rich_components(self) -> None:
+        sim = np.array(
+            [
+                [1.0, 0.7, 0.2, 0.1],
+                [0.7, 1.0, 0.3, 0.2],
+                [0.2, 0.3, 1.0, 0.8],
+                [0.1, 0.2, 0.8, 1.0],
+            ],
+            dtype=np.float64,
+        )
+        centers = np.array([20.0, 22.0, 90.0, 92.0], dtype=np.float64)
+        profiles = compute_condition_component_displacement_profiles(
+            sim,
+            xbin_centers=centers,
+            condition_name="PO3",
+            include_rich=True,
+            include_poor=False,
+        )
+
+        self.assertIsNotNone(profiles.layout)
+        np.testing.assert_array_equal(
+            profiles.zone_labels_k,
+            np.array(["rich_1", "rich_1", "rich_2", "rich_2"], dtype=np.str_),
+        )
+        self.assertEqual(set(profiles.within_profiles), {"rich_1", "rich_2"})
+        np.testing.assert_array_equal(
+            profiles.within_profiles["rich_1"].n_pairs,
+            np.array([1, 0, 0], dtype=np.int64),
+        )
+        np.testing.assert_array_equal(
+            profiles.within_profiles["rich_2"].n_pairs,
+            np.array([1, 0, 0], dtype=np.int64),
+        )
+        self.assertAlmostEqual(float(profiles.within_profiles["rich_1"].mean[0]), 0.7, places=6)
+        self.assertAlmostEqual(float(profiles.within_profiles["rich_2"].mean[0]), 0.8, places=6)
 
     def test_mean_geometry_uses_pooled_counts_over_pooled_occupancy(self) -> None:
         counts = np.array(
