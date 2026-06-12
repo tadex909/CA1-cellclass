@@ -13,7 +13,9 @@ This repository has two main layers:
 ## Project Structure
 
 - `src/cellclass/`
-  - Core library code for signal processing, ACG/waveform features, and IO utilities.
+  - Core library code for signal processing, ACG/waveform features, and the feature extraction pipeline.
+  - `config.py` is the shared source for feature defaults, age groups, and `type_u` label conventions.
+  - `validation.py` checks file/table contracts at pipeline boundaries.
 - `scripts/`
   - Organized CLI entry points:
     - `scripts/pipelines/` (data/feature/placefield pipelines)
@@ -81,11 +83,14 @@ Typical outputs include:
 
 Main orchestration scripts:
 
-1. `scripts/pipelines/interim_to_processed.py`
+1. `src/cellclass/pipeline.py`
+   - Package-level feature extraction for one `*_allcel.npz` session.
+
+2. `scripts/pipelines/interim_to_processed.py`
    - Runs extraction on all interim `.npz` sessions.
    - Writes per-session files under `data/processed/<mouse>/...`.
 
-2. `scripts/pipelines/aggregate_by_age.py`
+3. `scripts/pipelines/aggregate_by_age.py`
    - Merges sessions with age metadata (`data/schedule.xlsx`).
    - Writes age-group datasets in `results/<AGE>/`.
 
@@ -127,10 +132,19 @@ Main orchestration scripts:
 
 From repository root:
 
+Run the full `type_u` comparison workflow in one command:
+
+```powershell
+python scripts/pipelines/build_type_u_comparison_from_raw.py --dry-run
+python scripts/pipelines/build_type_u_comparison_from_raw.py
+```
+
+This expands to the manual stages below.
+
 1. Process interim sessions
 
 ```powershell
-python scripts/pipelines/interim_to_processed.py --interim_root data/interim --processed_root data/processed --skip_existing
+python scripts/pipelines/interim_to_processed.py --interim_root data/interim --processed_root data/processed --pattern "*_allcel.npz" --skip_existing
 ```
 
 2. Aggregate by age group

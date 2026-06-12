@@ -23,7 +23,7 @@ def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
         description=(
             "Aggregate per-age-group *_classification_info.csv files into a canonical "
-            "session_id/cell_id/pred_type table."
+            "session_id/cell_id/pred_type/p_pred_type table with a low-confidence flag."
         )
     )
     ap.add_argument(

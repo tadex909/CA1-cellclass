@@ -3,21 +3,26 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import sys
+
 import numpy as np
 import pandas as pd
 
 
-DEFAULT_FEATURES = [
-    "fr_hz",
-    "burst_index",
-    "cv2",
-    "spk_duration_ms",
-    "spk_peaktrough_ms",
-    "spk_asymmetry",
-    "refractory_ms_center",
-    "acg_peak_latency_ms",
-    "type_u"
-]
+THIS_DIR = Path(__file__).resolve().parent
+root = THIS_DIR
+while root != root.parent and not (root / "src" / "cellclass").is_dir():
+    root = root.parent
+src_dir = root / "src"
+if not (src_dir / "cellclass").is_dir():
+    raise RuntimeError(f"Could not find src/cellclass starting from {THIS_DIR}")
+sys.path.insert(0, str(src_dir))
+
+from cellclass.config import DEFAULT_MOUSE_AGGREGATION_FEATURES, csv_join  # noqa: E402
+from cellclass.validation import validate_feature_table  # noqa: E402
+
+
+DEFAULT_FEATURES = list(DEFAULT_MOUSE_AGGREGATION_FEATURES)
 
 
 def load_mouse_features(mouse_dir: Path) -> pd.DataFrame:
@@ -32,6 +37,7 @@ def load_mouse_features(mouse_dir: Path) -> pd.DataFrame:
     dfs = []
     for fp in files:
         df = pd.read_parquet(fp)
+        validate_feature_table(df, source=fp)
         df["features_file"] = fp.name
         dfs.append(df)
 
@@ -121,7 +127,7 @@ def main() -> None:
     ap.add_argument("--qc", action="store_true", help="Apply QC filtering for CLEAN output")
     ap.add_argument("--qc_strict", action="store_true", help="Require all qc_* True (if --qc)")
 
-    ap.add_argument("--features", type=str, default=",".join(DEFAULT_FEATURES),
+    ap.add_argument("--features", type=str, default=csv_join(DEFAULT_FEATURES),
                     help="Comma-separated feature columns to include in ML matrix")
     ap.add_argument("--no_log_fr", action="store_true", help="Do not log-transform fr_hz")
     ap.add_argument("--no_standardize", action="store_true", help="Do not z-score features")
@@ -132,6 +138,7 @@ def main() -> None:
     mouse_dir = processed_root / args.mouse
     outdir = Path(args.outdir) / args.mouse
     outdir.mkdir(parents=True, exist_ok=True)
+    feature_cols = [s.strip() for s in args.features.split(",") if s.strip()]
 
     df_all = load_mouse_features(mouse_dir)
     all_path = outdir / f"{args.mouse}_all_units.parquet"
@@ -141,12 +148,12 @@ def main() -> None:
     df_clean = df_all
     if args.qc:
         df_clean = apply_qc_filters(df_clean, strict=args.qc_strict)
+    validate_feature_table(df_clean, source=f"{args.mouse} clean units")
 
     clean_path = outdir / f"{args.mouse}_clean_units.parquet"
     df_clean.to_parquet(clean_path, index=False)
 
     # ML matrix
-    feature_cols = [s.strip() for s in args.features.split(",") if s.strip()]
     X, used_cols, df_ml, meta = build_ml_matrix(
         df_clean,
         feature_cols,

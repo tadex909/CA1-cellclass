@@ -6,6 +6,8 @@ Supported modes:
 1) ratemap  -> expects *_Ratemap*.mat and exports `allcel` (+ selected `allpf`)
                and, when present, also exports `pf` to a sibling *_pf.npz.
 2) trajdata -> expects *_TrajData*.mat and exports only `Traj` fields.
+3) traj_matilde -> expects *_Bhv0.mat and adapts Matilde `bhv` fields to the
+                   trajectory schema used by the Python placefield pipeline.
 """
 
 from __future__ import annotations
@@ -35,6 +37,25 @@ DEFAULT_TRAJ_FIELDS = [
     "tstart",
     "tstop",
     "endVR",
+]
+
+DEFAULT_MATILDE_TRAJ_FIELDS = [
+    "Cond",
+    "time",
+    "VRtraj",
+    "condition",
+    "Speed",
+    "XSpeed",
+    "binSpX",
+    "WB",
+    "start",
+    "stop",
+    "tstart",
+    "tstop",
+    "endVR",
+    "icond_tr",
+    "icondw_tr",
+    "way_tr",
 ]
 
 
@@ -176,6 +197,18 @@ def extract_traj(mat_dict: Dict[str, Any]) -> Any:
     raise KeyError(f"Could not find 'Traj' in MAT file. Top-level keys: {keys}")
 
 
+def extract_matilde_structs(mat_dict: Dict[str, Any]) -> tuple[Dict[str, Any], Dict[str, Any]]:
+    bhv = mat_dict.get("bhv")
+    eprm = mat_dict.get("eprm")
+    if not isinstance(bhv, dict) or not isinstance(eprm, dict):
+        keys = ", ".join(sorted(mat_dict.keys()))
+        raise KeyError(
+            "Could not find Matilde 'bhv' and 'eprm' structs in MAT file. "
+            f"Top-level keys: {keys}"
+        )
+    return bhv, eprm
+
+
 def maybe_cast_int(_name: str, arr: Any) -> Any:
     if not isinstance(arr, np.ndarray):
         return arr
@@ -219,6 +252,158 @@ def traj_to_records(traj_obj: Any) -> list[dict[str, Any]]:
         if out:
             return out
     raise TypeError("Unexpected Traj format. Expected dict or array/list of dict records.")
+
+
+def _as_1d_numeric(struct: Dict[str, Any], field: str, *, dtype: Any) -> np.ndarray:
+    if field not in struct:
+        raise KeyError(f"Matilde bhv struct is missing required field '{field}'")
+    arr = np.asarray(struct[field]).ravel()
+    if not np.all(np.isfinite(arr)):
+        raise ValueError(f"Matilde bhv.{field} contains non-finite values")
+    return arr.astype(dtype)
+
+
+def _matlab_text_values(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value.strip()]
+    if isinstance(value, np.ndarray):
+        out: list[str] = []
+        for v in value.ravel():
+            out.extend(_matlab_text_values(v))
+        return out
+    if isinstance(value, (list, tuple)):
+        out = []
+        for v in value:
+            out.extend(_matlab_text_values(v))
+        return out
+    return [str(value).strip()]
+
+
+def _matilde_behavior_freq_hz(bhv: Dict[str, Any], time_d: np.ndarray) -> float:
+    prm = bhv.get("prm")
+    if isinstance(prm, dict) and "freq_d" in prm:
+        return float(np.asarray(prm["freq_d"]).item())
+    if time_d.size < 2:
+        raise ValueError("Cannot infer Matilde behavior frequency from fewer than two samples")
+    dt = float(np.nanmedian(np.diff(time_d)))
+    if not np.isfinite(dt) or dt <= 0:
+        raise ValueError(f"Cannot infer Matilde behavior frequency from dt={dt}")
+    return 1.0 / dt
+
+
+def matilde_traj_to_records(
+    bhv: Dict[str, Any],
+    eprm: Dict[str, Any],
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """
+    Adapt Matilde Bhv0 files to the compact trial-oriented Traj schema.
+
+    Bhv0 stores behavioral samples at `bhv.prm.freq_d` (100 Hz in the
+    inspected sessions). Trial boundaries in `idtrack_tr` use that timebase
+    and MATLAB's inclusive 1-based indexing.
+    """
+    idtrack = np.asarray(bhv.get("idtrack_tr"))
+    if idtrack.ndim != 2 or idtrack.shape[1] != 2:
+        raise ValueError(
+            "Matilde bhv.idtrack_tr must be an n_trials x 2 array of trial boundaries"
+        )
+    if not np.all(np.isfinite(idtrack)):
+        raise ValueError("Matilde bhv.idtrack_tr contains non-finite values")
+    idtrack = np.rint(idtrack).astype(np.int64)
+
+    n_trials = idtrack.shape[0]
+    way_tr = _as_1d_numeric(bhv, "way_tr", dtype=np.int64)
+    icond_tr = _as_1d_numeric(bhv, "icond_tr", dtype=np.int64)
+    icondw_tr = _as_1d_numeric(bhv, "icondw_tr", dtype=np.int64)
+    for field, values in (
+        ("way_tr", way_tr),
+        ("icond_tr", icond_tr),
+        ("icondw_tr", icondw_tr),
+    ):
+        if values.size != n_trials:
+            raise ValueError(
+                f"Matilde bhv.{field} trial count mismatch: {values.size} vs {n_trials}"
+            )
+
+    if not np.all(np.isin(way_tr, [0, 1])):
+        raise ValueError("Matilde bhv.way_tr must contain only 0/1 direction labels")
+    if np.any(icondw_tr <= 0):
+        raise ValueError("Matilde bhv.icondw_tr must contain positive labels")
+
+    time_d = _as_1d_numeric(bhv, "time_d", dtype=np.float64)
+    vrtraj = _as_1d_numeric(bhv, "p_x_ds", dtype=np.float64)
+    speed = _as_1d_numeric(bhv, "v_x_ds2", dtype=np.float64)
+    n_samples = time_d.size
+    if vrtraj.size != n_samples or speed.size != n_samples:
+        raise ValueError(
+            "Matilde sample count mismatch: "
+            f"time_d={n_samples}, p_x_ds={vrtraj.size}, v_x_ds2={speed.size}"
+        )
+
+    starts = idtrack[:, 0]
+    stops = idtrack[:, 1]
+    if np.any(starts < 1) or np.any(stops < starts) or np.any(stops > n_samples):
+        raise ValueError(
+            f"Matilde bhv.idtrack_tr boundaries must fall within 1..{n_samples}"
+        )
+
+    # Odd/even condition-direction ids are paired into contiguous experiment
+    # blocks so repeated condition names (for example PO, PO, PNO) stay distinct.
+    block_ids = (icondw_tr + 1) // 2
+    condition_names = _matlab_text_values(eprm.get("cond", []))
+    bin_sp_x = np.asarray(bhv["vel_tx"]) if "vel_tx" in bhv else None
+    if bin_sp_x is not None and (bin_sp_x.ndim != 2 or bin_sp_x.shape[0] != n_trials):
+        raise ValueError(
+            "Matilde bhv.vel_tx must be an n_trials x n_position_bins array"
+        )
+
+    records: list[dict[str, Any]] = []
+    for i in range(n_trials):
+        start_1b = int(starts[i])
+        stop_1b = int(stops[i])
+        sample_slice = slice(start_1b - 1, stop_1b)
+        trial_time = time_d[sample_slice]
+        block_id = int(block_ids[i])
+        condition = (
+            condition_names[block_id - 1]
+            if block_id <= len(condition_names) and condition_names[block_id - 1]
+            else str(int(icond_tr[i]))
+        )
+        record: dict[str, Any] = {
+            "Cond": block_id,
+            "time": trial_time - trial_time[0],
+            "VRtraj": vrtraj[sample_slice],
+            "condition": condition,
+            "Speed": speed[sample_slice],
+            "XSpeed": speed[sample_slice],
+            "WB": "W" if way_tr[i] == 0 else "B",
+            "start": start_1b,
+            "stop": stop_1b,
+            "tstart": float(trial_time[0]),
+            "tstop": float(trial_time[-1]),
+            "endVR": float(trial_time[-1]),
+            "icond_tr": int(icond_tr[i]),
+            "icondw_tr": int(icondw_tr[i]),
+            "way_tr": int(way_tr[i]),
+        }
+        if bin_sp_x is not None:
+            record["binSpX"] = bin_sp_x[i]
+        records.append(record)
+
+    meta = {
+        "adapter": "matilde_bhv0",
+        "behavior_freq_hz": _matilde_behavior_freq_hz(bhv, time_d),
+        "source_trial_bounds": "bhv.idtrack_tr (MATLAB inclusive 1-based behavior indices)",
+        "source_position": "bhv.p_x_ds",
+        "source_speed": "bhv.v_x_ds2",
+        "source_bin_speed": "bhv.vel_tx" if bin_sp_x is not None else None,
+        "condition_mapping": "Traj.Cond = ceil(bhv.icondw_tr / 2)",
+        "direction_mapping": "bhv.way_tr 0 -> Traj.WB W; 1 -> Traj.WB B",
+        "source_condition_names": condition_names,
+    }
+    return records, meta
 
 
 def struct_to_records(struct_obj: Any, struct_name: str = "struct") -> list[dict[str, Any]]:
@@ -299,7 +484,11 @@ def convert_one(
     traj_fields_req: list[str] | None = None,
     pf_tag: str | None = None,
 ) -> Path:
-    marker = "Ratemap" if mode == "ratemap" else "TrajData"
+    marker = {
+        "ratemap": "Ratemap",
+        "trajdata": "TrajData",
+        "traj_matilde": "Bhv0",
+    }[mode]
     if marker.lower() not in mat_path.name.lower():
         raise ValueError(f"File does not contain '{marker}' in name: {mat_path.name}")
 
@@ -316,6 +505,8 @@ def convert_one(
     if mode == "ratemap":
         # Load only what we need from potentially large/complex MAT files.
         md = load_mat_file(mat_path, variable_names=["allcel", "allcell", "allpf", "pf"])
+    elif mode == "traj_matilde":
+        md = load_mat_file(mat_path, variable_names=["bhv", "eprm"])
     else:
         md = load_mat_file(mat_path, variable_names=["Traj"])
     payload: Dict[str, Any] = {}
@@ -404,8 +595,13 @@ def convert_one(
         payload["meta_json"] = np.array(json.dumps(meta), dtype=np.string_)
 
     else:
-        traj = extract_traj(md)
-        records = traj_to_records(traj)
+        if mode == "traj_matilde":
+            bhv, eprm = extract_matilde_structs(md)
+            records, adapter_meta = matilde_traj_to_records(bhv, eprm)
+            meta["traj_matilde"] = adapter_meta
+        else:
+            traj = extract_traj(md)
+            records = traj_to_records(traj)
         fields_all = sorted({k for rec in records for k in rec.keys()})
         if traj_fields_req:
             lookup = {f.lower(): f for f in fields_all}
@@ -458,9 +654,15 @@ def main() -> None:
     ap.add_argument(
         "--mode",
         type=str,
-        choices=["ratemap", "trajdata"],
+        choices=["ratemap", "trajdata", "traj_matilde"],
         default="ratemap",
         help="Choose conversion mode.",
+    )
+    ap.add_argument(
+        "--traj_matilde",
+        "--traj-matilde",
+        action="store_true",
+        help="Shortcut for --mode traj_matilde.",
     )
     ap.add_argument(
         "--input",
@@ -468,7 +670,8 @@ def main() -> None:
         default="",
         help=(
             "Input .mat file or directory. "
-            "Default: data/raw (ratemap) or data/raw/trajdata (trajdata)."
+            "Default: data/raw (ratemap), data/raw/trajdata (trajdata), or "
+            "data/matlab/Good_sessions_Bayesian_Decoding (traj_matilde)."
         ),
     )
     ap.add_argument(
@@ -504,8 +707,13 @@ def main() -> None:
     ap.add_argument("--dry-run", action="store_true", help="Only print what would be converted.")
     args = ap.parse_args()
 
+    if args.traj_matilde:
+        args.mode = "traj_matilde"
+
     if args.input:
         in_path = Path(args.input)
+    elif args.mode == "traj_matilde":
+        in_path = Path("data/matlab/Good_sessions_Bayesian_Decoding")
     else:
         in_path = Path("data/raw/trajdata") if args.mode == "trajdata" else Path("data/raw")
 
@@ -516,18 +724,27 @@ def main() -> None:
     out_root.mkdir(parents=True, exist_ok=True)
 
     mat_files = list(iter_mat_files(in_path, recursive=args.recursive))
-    marker = "ratemap" if args.mode == "ratemap" else "trajdata"
+    marker = {
+        "ratemap": "ratemap",
+        "trajdata": "trajdata",
+        "traj_matilde": "bhv0",
+    }[args.mode]
     mat_files = [p for p in mat_files if (marker in p.name.lower() and p.suffix.lower() == ".mat")]
 
     if not mat_files:
         raise SystemExit(f"No '*{marker}*.mat' files found in {in_path}")
 
     traj_fields_req: list[str] | None = None
-    if args.mode == "trajdata":
+    if args.mode in ("trajdata", "traj_matilde"):
         if args.traj_fields.strip().lower() == "all":
             traj_fields_req = None
         else:
-            traj_fields_req = parse_csv_list(args.traj_fields) or DEFAULT_TRAJ_FIELDS
+            default_fields = (
+                DEFAULT_MATILDE_TRAJ_FIELDS
+                if args.mode == "traj_matilde"
+                else DEFAULT_TRAJ_FIELDS
+            )
+            traj_fields_req = parse_csv_list(args.traj_fields) or default_fields
 
     print(f"Found {len(mat_files)} file(s).")
     pf_tag = args.pf_tag.strip() or None

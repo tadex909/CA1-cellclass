@@ -3,40 +3,23 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import sys
 
 import numpy as np
 import pandas as pd
 
+SRC_DIR = Path(__file__).resolve().parents[1]
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
 
-def parse_csv_list(raw: str | None) -> list[str]:
-    if not raw:
-        return []
-    return [x.strip() for x in raw.split(",") if x.strip()]
-
-
-def normalize_type_u(series: pd.Series) -> pd.Series:
-    """
-    Map external labels to binary convention:
-      0 = interneuron
-      1 = pyramidal
-    """
-    s = series.copy()
-    if pd.api.types.is_numeric_dtype(s):
-        out = pd.to_numeric(s, errors="coerce")
-        out = out.where(out.isin([0, 1]), np.nan)
-        return out.astype("Int64")
-
-    s = s.astype(str).str.strip().str.lower()
-    mapping = {
-        "0": 0,
-        "interneuron": 0,
-        "int": 0,
-        "1": 1,
-        "pyramidal": 1,
-        "pyr": 1,
-    }
-    out = s.map(mapping)
-    return out.astype("Int64")
+from cellclass.config import (  # noqa: E402
+    CELL_TYPE_INTERNEURON,
+    CELL_TYPE_PYRAMIDAL,
+    TYPE_U_INTERNEURON,
+    normalize_type_u,
+    parse_csv_list,
+    type_u_binary_to_name,
+)
 
 
 def load_all_rows(comparison_root: Path) -> pd.DataFrame:
@@ -68,12 +51,14 @@ def ensure_discrepancy_columns(df: pd.DataFrame) -> pd.DataFrame:
         if "type_u_binary" not in d.columns and "allcel__type_u" in d.columns:
             d["type_u_binary"] = normalize_type_u(d["allcel__type_u"])
         if "type_u_binary" in d.columns:
-            d["type_u_type"] = np.where(
-                d["type_u_binary"] == 0, "interneuron", "pyramidal"
-            )
+            d["type_u_type"] = type_u_binary_to_name(d["type_u_binary"])
 
     if "pred_type" not in d.columns and "pred_binary" in d.columns:
-        d["pred_type"] = np.where(d["pred_binary"] == 0, "interneuron", "pyramidal")
+        d["pred_type"] = np.where(
+            d["pred_binary"] == TYPE_U_INTERNEURON,
+            CELL_TYPE_INTERNEURON,
+            CELL_TYPE_PYRAMIDAL,
+        )
 
     if "discrepancy" not in d.columns:
         if {"pred_binary", "type_u_binary"}.issubset(d.columns):
@@ -110,7 +95,7 @@ def add_posterior_probability(df: pd.DataFrame) -> pd.DataFrame:
     pred = d.get("pred_type")
     if p_int is not None and p_pyr is not None and pred is not None:
         d["posterior_probability"] = np.where(
-            pred.astype(str).str.lower().eq("interneuron"),
+            pred.astype(str).str.lower().eq(CELL_TYPE_INTERNEURON),
             pd.to_numeric(p_int, errors="coerce"),
             pd.to_numeric(p_pyr, errors="coerce"),
         )

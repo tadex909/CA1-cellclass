@@ -16,6 +16,7 @@ This folder is organized by intent:
 Use these paths for new commands:
 
 - `scripts/pipelines/interim_to_processed.py`
+- `scripts/pipelines/build_type_u_comparison_from_raw.py`
 - `scripts/pipelines/aggregate_by_age.py`
 - `scripts/pipelines/aggregate_mouse.py`
 - `scripts/pipelines/build_ratemap_from_interim.py`

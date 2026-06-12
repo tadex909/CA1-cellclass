@@ -12,46 +12,13 @@ from sklearn.metrics import adjusted_rand_score, silhouette_score
 from sklearn.mixture import GaussianMixture
 
 from fitting import DEFAULT_AGE_GROUPS, prepare_matrix
+from cellclass.config import FEATURE_SET_EXPERIMENTS, csv_join, parse_csv_list  # noqa: E402
+from cellclass.validation import validate_age_group_table  # noqa: E402
 
 
 FEATURE_SETS: dict[str, list[str]] = {
-    "all_features": [
-        "fr_hz",
-        "burst_index",
-        "cv2",
-        "spk_duration_ms",
-        "spk_peaktrough_ms",
-        "spk_asymmetry",
-        "refractory_ms_edge",
-        "acg_peak_latency_ms",
-    ],
-    "some_features": [
-        "fr_hz",
-        "cv2",
-        "acg_peak_latency_ms",
-        "spk_duration_ms",
-        "spk_asymmetry",
-    ],
-    "few_features": [
-        "fr_hz",
-        "spk_duration_ms",
-        "refractory_ms_edge",
-    ],
-    "valero_features": [
-        "cv2",
-        "acg_peak_latency_ms",
-        "spk_duration_ms",
-        "spk_asymmetry",
-        "fr_hz",
-    ],
+    name: list(features) for name, features in FEATURE_SET_EXPERIMENTS.items()
 }
-
-
-def parse_csv_list(raw: str | None) -> list[str]:
-    if not raw:
-        return []
-    return [x.strip() for x in raw.split(",") if x.strip()]
-
 
 def parse_int_list(raw: str | None, default: list[int]) -> list[int]:
     if not raw:
@@ -155,7 +122,7 @@ def main() -> None:
     )
     ap.add_argument("--results_root", type=str, default="results")
     ap.add_argument("--out_root", type=str, default="results/feature_set_experiments")
-    ap.add_argument("--age_groups", type=str, default=",".join(DEFAULT_AGE_GROUPS))
+    ap.add_argument("--age_groups", type=str, default=csv_join(DEFAULT_AGE_GROUPS))
     ap.add_argument("--k_values", type=str, default="1,2,3")
     ap.add_argument("--seeds", type=str, default="0,1,2,3,4")
     ap.add_argument("--n_init", type=int, default=10)
@@ -187,6 +154,15 @@ def main() -> None:
             continue
 
         df = pd.read_parquet(in_path)
+        if "unit_uid" not in df.columns:
+            df["unit_uid"] = df["session_id"].astype(str) + "__cell" + df["cell_id"].astype(str)
+        required_features = sorted({f for features in FEATURE_SETS.values() for f in features})
+        validate_age_group_table(
+            df,
+            source=in_path,
+            age_group=age_group,
+            required_features=required_features,
+        )
 
         for set_name, feature_cols in FEATURE_SETS.items():
             pack = prepare_matrix(

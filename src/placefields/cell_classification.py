@@ -7,10 +7,43 @@ import pandas as pd
 
 
 REQUIRED_CLASSIFICATION_COLUMNS = ("session_id", "cell_id", "pred_type")
+CONFIDENT_PRED_TYPE_COLUMN = "Sure (P(pred_type) > 0.6)"
+COMPACT_CLASSIFICATION_COLUMNS = (
+    "session_id",
+    "cell_id",
+    "pred_type",
+    "p_pred_type",
+    CONFIDENT_PRED_TYPE_COLUMN,
+    "age_group",
+)
 
 
 def _normalize_pred_type(value: object) -> str:
     return str(value).strip().lower()
+
+
+def _add_pred_type_probability(out: pd.DataFrame) -> pd.DataFrame:
+    if "p_pred_type" in out.columns:
+        out["p_pred_type"] = pd.to_numeric(out["p_pred_type"], errors="coerce")
+        out[CONFIDENT_PRED_TYPE_COLUMN] = out["p_pred_type"] > 0.6
+        return out
+
+    p = pd.Series(np.nan, index=out.index, dtype=np.float64)
+    if {"gmm_p_interneuron", "gmm_p_pyramidal"}.issubset(out.columns):
+        p_interneuron = pd.to_numeric(out["gmm_p_interneuron"], errors="coerce")
+        p_pyramidal = pd.to_numeric(out["gmm_p_pyramidal"], errors="coerce")
+        is_interneuron = out["pred_type"].astype(str) == "interneuron"
+        is_pyramidal = out["pred_type"].astype(str) == "pyramidal"
+        p.loc[is_interneuron] = p_interneuron.loc[is_interneuron]
+        p.loc[is_pyramidal] = p_pyramidal.loc[is_pyramidal]
+
+    if "gmm_pmax" in out.columns:
+        pmax = pd.to_numeric(out["gmm_pmax"], errors="coerce")
+        p = p.fillna(pmax)
+
+    out["p_pred_type"] = p
+    out[CONFIDENT_PRED_TYPE_COLUMN] = out["p_pred_type"] > 0.6
+    return out
 
 
 def _prepare_classification_frame(d: pd.DataFrame, *, source_label: str) -> pd.DataFrame:
@@ -26,6 +59,7 @@ def _prepare_classification_frame(d: pd.DataFrame, *, source_label: str) -> pd.D
     out = out.loc[out["session_id"] != ""].copy()
     out = out.loc[out["pred_type"] != ""].copy()
     out["cell_id"] = out["cell_id"].astype(np.int64)
+    out = _add_pred_type_probability(out)
     return out
 
 
@@ -46,9 +80,9 @@ def load_cell_classification_table(source: str | Path) -> pd.DataFrame:
 
     merged = pd.concat(frames, ignore_index=True)
     if merged.empty:
-        return pd.DataFrame(columns=["session_id", "cell_id", "pred_type"])
+        return pd.DataFrame(columns=[c for c in COMPACT_CLASSIFICATION_COLUMNS if c != "age_group"])
 
-    keep_cols = [c for c in ("session_id", "cell_id", "pred_type", "age_group") if c in merged.columns]
+    keep_cols = [c for c in COMPACT_CLASSIFICATION_COLUMNS if c in merged.columns]
     merged = merged[keep_cols].copy()
 
     conflicts = (

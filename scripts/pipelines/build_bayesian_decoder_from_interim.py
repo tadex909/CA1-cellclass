@@ -49,6 +49,7 @@ SUMMARY_COLUMNS = [
     "condition_label",
     "decode_groupby",
     "group_condition_families",
+    "train_all_laps",
     "train_group",
     "train_group_label",
     "n_windows",
@@ -83,13 +84,15 @@ def default_run_id(args: argparse.Namespace) -> str:
     tau_tag = format_param_token("tau", f"{float(args.tau_s):g}")
     group_tag = format_param_token("group", str(args.decode_groupby))
     family_tag = "family" if bool(args.group_condition_families) else "exact"
+    train_tag = "train_all_laps" if bool(args.train_all_laps) else "leave_one_lap"
+    cell_tag = format_param_token("cells", str(args.cell_selection))
     bin_tag = format_param_token("bin", f"{float(args.bin_size_cm):g}")
     smooth_tag = format_param_token("smooth", f"{float(args.smooth_sigma_bins):g}")
     xrem_tag = format_param_token("xrem", int(args.xbin_rem))
     speed_val = "none" if not np.isfinite(args.min_speed) else f"{float(args.min_speed):g}"
     speed_tag = format_param_token("minspeed", speed_val)
     return (
-        f"bayes_decode__{group_tag}__{family_tag}__{tau_tag}__{bin_tag}__"
+        f"bayes_decode__{group_tag}__{family_tag}__{train_tag}__{cell_tag}__{tau_tag}__{bin_tag}__"
         f"{smooth_tag}__{xrem_tag}__{speed_tag}__{ts}"
     )
 
@@ -155,20 +158,90 @@ def condition_label_for_condway(condway: int, condition_name_map: dict[int, str]
     return f"{name} {direction}"
 
 
+def parse_bool_series(values: pd.Series) -> pd.Series:
+    if values.dtype == bool:
+        return values.fillna(False)
+    return values.map(lambda value: str(value).strip().lower() in {"true", "1", "yes"})
+
+
+def processed_ssi_classification_path(session_id: str, processed_root: Path) -> Path:
+    mouse = str(session_id).split("_", 1)[0]
+    return processed_root / mouse / "ssi" / str(session_id) / "ssi_classification.csv"
+
+
+def pyr_plus_sm_interneuron_cell_ids(
+    *,
+    session_id: str,
+    all_cell_ids: np.ndarray,
+    processed_root: Path,
+) -> tuple[np.ndarray, dict[str, Any]]:
+    ssi_path = processed_ssi_classification_path(session_id, processed_root)
+    if not ssi_path.exists():
+        raise FileNotFoundError(f"Missing processed SSI classification for {session_id}: {ssi_path}")
+
+    d = pd.read_csv(ssi_path)
+    required = {"cell_id", "SM"}
+    missing = required.difference(d.columns)
+    if missing:
+        raise KeyError(f"{ssi_path} missing required columns: {sorted(missing)}")
+
+    type_col = "cell_type" if "cell_type" in d.columns else "pred_type" if "pred_type" in d.columns else None
+    if type_col is None:
+        raise KeyError(f"{ssi_path} must contain cell_type or pred_type for PYR+SMINTER selection")
+
+    d = d.copy()
+    d["cell_id"] = pd.to_numeric(d["cell_id"], errors="coerce")
+    d = d.dropna(subset=["cell_id"]).copy()
+    d["cell_id"] = d["cell_id"].astype(np.int64)
+    d = d[np.isin(d["cell_id"], np.asarray(all_cell_ids, dtype=np.int64))]
+    d["cell_type_norm"] = d[type_col].astype(str).str.strip().str.lower()
+    d["SM_bool"] = parse_bool_series(d["SM"])
+
+    pyr_ids = set(d.loc[d["cell_type_norm"] == "pyramidal", "cell_id"].astype(np.int64))
+    sm_inter_ids = set(
+        d.loc[
+            (d["cell_type_norm"] == "interneuron") & d["SM_bool"],
+            "cell_id",
+        ].astype(np.int64)
+    )
+    selected = np.asarray(sorted(pyr_ids.union(sm_inter_ids)), dtype=np.int64)
+    meta = {
+        "ssi_classification_csv": str(ssi_path),
+        "n_pyramidal_selected": int(len(pyr_ids)),
+        "n_sm_interneuron_selected": int(len(sm_inter_ids)),
+    }
+    return selected, meta
+
+
 def selected_cell_ids_for_run(
     *,
+    session_id: str,
     all_cell_ids: np.ndarray,
     requested_cell_ids: set[int],
     max_cells: int,
-) -> np.ndarray:
+    cell_selection: str,
+    processed_root: Path,
+) -> tuple[np.ndarray, dict[str, Any]]:
     ids = np.asarray(all_cell_ids, dtype=np.int64).ravel()
+    mode = str(cell_selection).strip().lower()
+    selection_meta: dict[str, Any] = {"cell_selection": mode or "all"}
+    if mode in {"pyr+sminter", "pyr+sm_inter", "pyr_sm_inter", "pyr+sm-inter"}:
+        ids, selection_meta = pyr_plus_sm_interneuron_cell_ids(
+            session_id=session_id,
+            all_cell_ids=ids,
+            processed_root=processed_root,
+        )
+        selection_meta["cell_selection"] = "PYR+SMINTER"
+    elif mode not in {"all", ""}:
+        raise ValueError("cell_selection must be 'all' or 'pyr+sm_inter'")
     if requested_cell_ids:
         ids = ids[np.isin(ids, list(requested_cell_ids))]
     if max_cells > 0:
         ids = ids[: int(max_cells)]
     if ids.size == 0:
         raise ValueError("No cells selected for decoding")
-    return ids
+    selection_meta["n_cells_selected_after_limits"] = int(ids.size)
+    return ids, selection_meta
 
 
 def load_summary_rows_from_decode_npz(npz_path: Path, session_id: str) -> list[dict[str, Any]]:
@@ -204,13 +277,16 @@ def load_summary_rows_from_decode_npz(npz_path: Path, session_id: str) -> list[d
                     condition_name_map = {int(k): str(v) for k, v in raw_map.items()}
                 decode_groupby = str(meta.get("decode_groupby", "unknown"))
                 group_condition_families = bool(meta.get("group_condition_families", False))
+                train_all_laps = bool(meta.get("train_all_laps", False))
             except Exception:
                 condition_name_map = {}
                 decode_groupby = "unknown"
                 group_condition_families = False
+                train_all_laps = False
         else:
             decode_groupby = "unknown"
             group_condition_families = False
+            train_all_laps = False
         if "decode__condition_label_w" in z.files:
             condition_label_w = np.asarray(z["decode__condition_label_w"]).astype(str)
         else:
@@ -231,6 +307,7 @@ def load_summary_rows_from_decode_npz(npz_path: Path, session_id: str) -> list[d
                 or condition_label_for_condway(int(condway), condition_name_map),
                 "decode_groupby": decode_groupby,
                 "group_condition_families": bool(group_condition_families),
+                "train_all_laps": bool(train_all_laps),
                 "train_group": ",".join(str(v) for v in sorted(set(train_group_w[idx].tolist()))),
                 "train_group_label": ",".join(
                     v for v in sorted(set(train_group_label_w[idx].tolist())) if v
@@ -284,10 +361,35 @@ def build_parser() -> argparse.ArgumentParser:
             "With --decode_groupby condway, direction is still kept separate."
         ),
     )
+    ap.add_argument(
+        "--train_all_laps",
+        action="store_true",
+        help=(
+            "Train each decoded lap on all laps in the same decode group, including "
+            "the lap being decoded. Default is leave-one-lap-out."
+        ),
+    )
     ap.add_argument("--min_valid_window_fraction", type=float, default=0.5)
     ap.add_argument("--rate_floor_hz", type=float, default=1e-12)
     ap.add_argument("--no_normalize_x", action="store_true")
 
+    ap.add_argument(
+        "--cell_selection",
+        type=str,
+        default="all",
+        choices=["all", "pyr+sm_inter"],
+        help=(
+            "Cell selection mode. 'all' uses all recorded cells. 'pyr+sm_inter' uses "
+            "all pyramidal cells plus interneurons with SM=True in at least one "
+            "condition-direction from data/processed/<mouse>/ssi/<session_id>/ssi_classification.csv."
+        ),
+    )
+    ap.add_argument(
+        "--processed_root",
+        type=str,
+        default="data/processed",
+        help="Root containing processed SSI outputs used by --cell_selection pyr+sm_inter.",
+    )
     ap.add_argument("--cell_ids", type=str, default="", help="Optional comma-separated cell ids.")
     ap.add_argument(
         "--max_cells",
@@ -331,6 +433,7 @@ def main() -> None:
 
     min_speed_cfg = None if not np.isfinite(args.min_speed) else float(args.min_speed)
     requested_cell_ids = parse_int_csv(args.cell_ids)
+    processed_root = Path(args.processed_root)
     decoder_cfg = BayesianDecoderConfig(
         freq_hz=float(args.behavior_freq_hz),
         tau_s=float(args.tau_s),
@@ -342,6 +445,7 @@ def main() -> None:
         rate_floor_hz=float(args.rate_floor_hz),
         decode_groupby=str(args.decode_groupby),
         group_condition_families=bool(args.group_condition_families),
+        train_all_laps=bool(args.train_all_laps),
     )
     decoder_cfg.validate()
 
@@ -368,9 +472,12 @@ def main() -> None:
             "min_speed": min_speed_cfg,
             "decode_groupby": str(args.decode_groupby),
             "group_condition_families": bool(args.group_condition_families),
+            "train_all_laps": bool(args.train_all_laps),
             "min_valid_window_fraction": float(args.min_valid_window_fraction),
             "rate_floor_hz": float(args.rate_floor_hz),
             "no_normalize_x": bool(args.no_normalize_x),
+            "cell_selection": str(args.cell_selection),
+            "processed_root": str(args.processed_root),
             "cell_ids": args.cell_ids,
             "max_cells": int(args.max_cells),
             "overwrite": bool(args.overwrite),
@@ -443,10 +550,13 @@ def main() -> None:
             xbin_edges = build_regular_xbin(x, float(args.bin_size_cm))
             spike_idx_1b = ifreq_swap(itime_25k, args.spike_freq_hz, args.behavior_freq_hz)
             spike_idx_0b = matlab_1b_to_python_0b(spike_idx_1b)
-            cell_ids_decode = selected_cell_ids_for_run(
+            cell_ids_decode, cell_selection_meta = selected_cell_ids_for_run(
+                session_id=session,
                 all_cell_ids=id_cel,
                 requested_cell_ids=requested_cell_ids,
                 max_cells=int(args.max_cells),
+                cell_selection=str(args.cell_selection),
+                processed_root=processed_root,
             )
 
             result = decode_bayesian_position_from_trials(
@@ -476,9 +586,12 @@ def main() -> None:
                 "min_speed": min_speed_cfg,
                 "decode_groupby": str(args.decode_groupby),
                 "group_condition_families": bool(args.group_condition_families),
+                "train_all_laps": bool(args.train_all_laps),
                 "min_valid_window_fraction": float(args.min_valid_window_fraction),
                 "rate_floor_hz": float(args.rate_floor_hz),
                 "normalize_x_to_100": bool(not args.no_normalize_x),
+                "cell_selection": str(args.cell_selection),
+                "cell_selection_meta": cell_selection_meta,
                 "requested_cell_ids": sorted(requested_cell_ids),
                 "max_cells": int(args.max_cells),
                 "n_cells_requested": int(cell_ids_decode.size),
@@ -486,7 +599,11 @@ def main() -> None:
                 "n_trials": int(len(trials)),
                 "n_windows": int(result.posterior_wx.shape[0]),
                 "n_bins": int(result.xbin_centers.size),
-                "cv": f"leave_one_lap_within_{args.decode_groupby}",
+                "cv": (
+                    f"train_all_laps_within_{args.decode_groupby}"
+                    if bool(args.train_all_laps)
+                    else f"leave_one_lap_within_{args.decode_groupby}"
+                ),
                 "condition_name_map": {str(k): v for k, v in sorted(condition_name_map.items())},
             }
 
@@ -505,6 +622,7 @@ def main() -> None:
             for row in result.summary_rows(session_id=session):
                 row["decode_groupby"] = str(args.decode_groupby)
                 row["group_condition_families"] = bool(args.group_condition_families)
+                row["train_all_laps"] = bool(args.train_all_laps)
                 row["condition_label"] = condition_label_for_condway(
                     int(row["condway"]),
                     condition_name_map,
@@ -525,6 +643,9 @@ def main() -> None:
                     "n_bins": int(result.xbin_centers.size),
                     "decode_groupby": str(args.decode_groupby),
                     "group_condition_families": bool(args.group_condition_families),
+                    "train_all_laps": bool(args.train_all_laps),
+                    "cell_selection": str(args.cell_selection),
+                    **cell_selection_meta,
                 }
             )
         except Exception as exc:

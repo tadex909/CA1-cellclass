@@ -5,9 +5,10 @@ import json
 import platform
 import subprocess
 import sys
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 import numpy as np
 import pandas as pd
@@ -28,7 +29,9 @@ from placefields import (
     build_default_xbin,
     build_ratemap_from_trials,
     build_trial_info_from_traj,
+    canonical_condition_name,
     compute_condition_occupancy,
+    decode_condway,
     empirical_pvalue_from_null,
     empirical_pval_cx,
     empirical_pval_tx,
@@ -42,6 +45,7 @@ from placefields import (
 from placefields.interim_io import (
     find_pairs,
     load_allcel_spikes,
+    load_traj_condition_names,
     load_traj_fields,
     stitch_trial_series,
 )
@@ -99,6 +103,96 @@ def write_run_config(path: Path, cfg: dict[str, Any]) -> None:
         json.dump(cfg, f, indent=2)
 
 
+def build_condition_name_map(traj_path: Path) -> dict[int, str]:
+    """Return 1-based base condition ids mapped to canonical condition labels."""
+    try:
+        cond_raw, names_raw = load_traj_condition_names(traj_path)
+    except Exception:
+        return {}
+
+    cond = np.asarray(cond_raw, dtype=np.int64)
+    names = np.asarray(names_raw, dtype=object)
+    out: dict[int, str] = {}
+    for condition_1b in np.unique(cond):
+        labels = [
+            canonical_condition_name(str(label))
+            for label in names[cond == condition_1b].tolist()
+        ]
+        labels = [label for label in labels if label]
+        if not labels:
+            continue
+        counts = Counter(labels)
+        winner = sorted(counts.items(), key=lambda item: (-item[1], item[0]))[0][0]
+        out[int(condition_1b)] = winner
+    return out
+
+
+def merge_cell_classification_columns(
+    ssi_df: pd.DataFrame,
+    *,
+    table_path: str | None,
+    repo_root: Path,
+) -> pd.DataFrame:
+    if not table_path:
+        return ssi_df
+
+    path = Path(table_path)
+    if not path.is_absolute():
+        path = repo_root / path
+    if not path.exists():
+        print(f"WARN: cell classification table not found: {path}")
+        return ssi_df
+
+    cell_df = pd.read_csv(path)
+    merge_cols = [
+        "session_id",
+        "cell_id",
+        "pred_type",
+        "p_pred_type",
+        "Sure (P(pred_type) > 0.6)",
+        "age_group",
+    ]
+    merge_cols = [col for col in merge_cols if col in cell_df.columns]
+    if "session_id" not in merge_cols or "cell_id" not in merge_cols:
+        print(f"WARN: cell classification table missing session_id/cell_id: {path}")
+        return ssi_df
+
+    cell_df = cell_df[merge_cols].drop_duplicates(["session_id", "cell_id"])
+    cell_df = cell_df.rename(columns={"pred_type": "cell_type"})
+    if "Sure (P(pred_type) > 0.6)" in cell_df.columns:
+        is_sure = cell_df["Sure (P(pred_type) > 0.6)"].map(
+            lambda value: (
+                bool(value)
+                if isinstance(value, (bool, np.bool_))
+                else str(value).strip().lower() in {"true", "1", "yes"}
+            )
+        )
+        cell_df["classification_certainty"] = np.where(is_sure, "sure", "unsure")
+    return ssi_df.merge(cell_df, on=["session_id", "cell_id"], how="left")
+
+
+def order_ssi_classification_columns(ssi_df: pd.DataFrame) -> pd.DataFrame:
+    preferred = [
+        "session_id",
+        "cell_id",
+        "cell_type",
+        "classification_certainty",
+        "p_pred_type",
+        "Sure (P(pred_type) > 0.6)",
+        "age_group",
+        "condition_1b",
+        "Condition",
+        "direction",
+        "ssi_obs",
+        "p_value",
+        "SM",
+        "sm_alpha",
+    ]
+    ordered = [col for col in preferred if col in ssi_df.columns]
+    ordered.extend(col for col in ssi_df.columns if col not in ordered)
+    return ssi_df.loc[:, ordered]
+
+
 def build_ssi_classification_rows(
     *,
     session_id: str,
@@ -106,7 +200,7 @@ def build_ssi_classification_rows(
     ssi_obs_cu: np.ndarray,
     ssi_pval_cu: np.ndarray,
     sm_alpha: float,
-    source: str,
+    condition_name_map: Mapping[int, str] | None = None,
 ) -> list[dict[str, Any]]:
     if ssi_obs_cu.shape != ssi_pval_cu.shape:
         raise ValueError(
@@ -118,9 +212,16 @@ def build_ssi_classification_rows(
         )
 
     rows: list[dict[str, Any]] = []
+    condition_name_map = condition_name_map or {}
     n_cond = int(ssi_obs_cu.shape[1])
     for u, cid in enumerate(cell_ids.astype(np.int64, copy=False)):
         for c in range(n_cond):
+            condition_1b = int(c + 1)
+            base_condition_1b, direction = decode_condway(condition_1b)
+            condition = condition_name_map.get(
+                int(base_condition_1b),
+                f"condition_{int(base_condition_1b)}",
+            )
             ssi_obs = float(ssi_obs_cu[u, c])
             pval = float(ssi_pval_cu[u, c])
             is_sm = bool(np.isfinite(pval) and (pval < float(sm_alpha)))
@@ -128,12 +229,13 @@ def build_ssi_classification_rows(
                 {
                     "session_id": str(session_id),
                     "cell_id": int(cid),
-                    "condition_1b": int(c + 1),
+                    "condition_1b": condition_1b,
+                    "Condition": condition,
+                    "direction": direction,
                     "ssi_obs": ssi_obs,
                     "p_value": pval,
                     "SM": is_sm,
                     "sm_alpha": float(sm_alpha),
-                    "source": str(source),
                 }
             )
     return rows
@@ -208,6 +310,15 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     ap.add_argument(
+        "--cell_classification_table",
+        type=str,
+        default="results/type_u_comparison_valero_feats_3/cell_classification_table.csv",
+        help=(
+            "Cell classification CSV to merge into the SSI classification table. "
+            "Set to an empty string to skip this merge."
+        ),
+    )
+    ap.add_argument(
         "--run_id",
         type=str,
         default="",
@@ -279,6 +390,7 @@ def main() -> None:
             "save_ssi_null": bool(args.save_ssi_null),
             "sm_alpha": float(args.sm_alpha),
             "classification_csv": classification_csv_cfg,
+            "cell_classification_table": str(args.cell_classification_table),
             "run_id": args.run_id,
             "no_run_subdir": bool(args.no_run_subdir),
             "overwrite": bool(args.overwrite),
@@ -303,6 +415,7 @@ def main() -> None:
     for session, allcel_path, traj_path in pairs:
         rel_parent = allcel_path.parent.relative_to(interim_root)
         out_path = out_root / rel_parent / f"{session}_pfnull.npz"
+        condition_name_map = build_condition_name_map(traj_path)
 
         if out_path.exists() and not args.overwrite:
             print(f"SKIP: {session} (exists)")
@@ -315,7 +428,7 @@ def main() -> None:
                         ssi_obs_cu=ssi_obs_skip,
                         ssi_pval_cu=ssi_pval_skip,
                         sm_alpha=float(args.sm_alpha),
-                        source="skip_exists",
+                        condition_name_map=condition_name_map,
                     )
                 )
             except Exception as exc:
@@ -532,7 +645,7 @@ def main() -> None:
                     ssi_obs_cu=ssi_obs_cu,
                     ssi_pval_cu=ssi_pval_cu,
                     sm_alpha=float(args.sm_alpha),
-                    source="computed",
+                    condition_name_map=condition_name_map,
                 )
             )
 
@@ -575,6 +688,12 @@ def main() -> None:
         dcls = pd.DataFrame(classification_rows).sort_values(
             ["session_id", "cell_id", "condition_1b"], kind="stable"
         )
+        dcls = merge_cell_classification_columns(
+            dcls,
+            table_path=(args.cell_classification_table.strip() or None),
+            repo_root=root,
+        )
+        dcls = order_ssi_classification_columns(dcls)
         dcls.to_csv(class_path, index=False)
         print(f"Wrote SSI classification: {class_path}")
     print("Done.")

@@ -1,14 +1,36 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 
 import numpy as np
+import pandas as pd
 
+from cellclass.config import DEFAULT_AGE_GROUPS, age_group_from_age, normalize_type_u
 from cellclass.features import compute_cv2, waveform_features_from_bestswaveforms
+from cellclass.pipeline import parse_session_id
 from cellclass.processing import compute_acg
 
 
 class CellclassSmokeTest(unittest.TestCase):
+    def test_config_age_groups_and_type_u_normalization(self) -> None:
+        self.assertEqual(DEFAULT_AGE_GROUPS, ("P16-18", "P19-21", "P22-24"))
+        self.assertEqual(age_group_from_age(16), "P16-18")
+        self.assertEqual(age_group_from_age(21), "P19-21")
+        self.assertEqual(age_group_from_age(25), None)
+
+        labels = normalize_type_u(pd.Series(["interneuron", "pyr", 1, "bad"]))
+        self.assertEqual(labels.iloc[:3].tolist(), [0, 1, 1])
+        self.assertTrue(pd.isna(labels.iloc[3]))
+
+    def test_pipeline_parse_session_id(self) -> None:
+        meta = parse_session_id(Path("VS57_2022-12-18_18-51-04_allcel.npz"))
+
+        self.assertEqual(meta["mouse"], "VS57")
+        self.assertEqual(meta["date"], "2022-12-18")
+        self.assertEqual(meta["time"], "18-51-04")
+        self.assertEqual(meta["session_id"], "VS57_2022-12-18_18-51-04")
+
     def test_compute_acg_has_expected_shape(self) -> None:
         spike_times_s = np.array([0.01, 0.02, 0.04, 0.11, 0.13, 0.16], dtype=np.float64)
         spike_cluster_ids = np.array([1, 1, 1, 2, 2, 2], dtype=np.int64)

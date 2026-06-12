@@ -33,6 +33,7 @@ def _cfg(
     min_speed: float | None = 2.0,
     decode_groupby: str = "condway",
     group_condition_families: bool = False,
+    train_all_laps: bool = False,
 ) -> BayesianDecoderConfig:
     return BayesianDecoderConfig(
         freq_hz=10.0,
@@ -45,6 +46,7 @@ def _cfg(
         rate_floor_hz=1e-12,
         decode_groupby=decode_groupby,
         group_condition_families=group_condition_families,
+        train_all_laps=train_all_laps,
     )
 
 
@@ -99,6 +101,26 @@ class BayesianDecodingTest(unittest.TestCase):
         np.testing.assert_array_equal(result.actual_bin_w, np.array([0, 1], dtype=np.int64))
         np.testing.assert_array_equal(result.decoded_bin_w, np.array([1, 0], dtype=np.int64))
         np.testing.assert_array_equal(result.n_train_laps_w, np.array([1, 1], dtype=np.int64))
+
+    def test_train_all_laps_includes_current_lap(self) -> None:
+        position_x = np.array([0.5] * 10 + [1.5] * 10, dtype=np.float64)
+        speed = np.full(position_x.size, 3.0, dtype=np.float64)
+        trials = [_trial(0, 0, 10), _trial(1, 10, 20)]
+
+        result = decode_bayesian_position_from_trials(
+            position_x=position_x,
+            spike_indices_0b=np.array([2, 12], dtype=np.int64),
+            spike_cell_ids=np.array([10, 11], dtype=np.int64),
+            cell_ids=np.array([10, 11], dtype=np.int64),
+            trials=trials,
+            xbin_edges=np.array([0.0, 1.0, 2.0], dtype=np.float64),
+            cfg=_cfg(train_all_laps=True),
+            speed=speed,
+        )
+
+        np.testing.assert_array_equal(result.actual_bin_w, np.array([0, 1], dtype=np.int64))
+        np.testing.assert_array_equal(result.decoded_bin_w, np.array([0, 1], dtype=np.int64))
+        np.testing.assert_array_equal(result.n_train_laps_w, np.array([2, 2], dtype=np.int64))
 
     def test_zero_spike_windows_keep_finite_normalized_posteriors(self) -> None:
         position_x = np.tile(

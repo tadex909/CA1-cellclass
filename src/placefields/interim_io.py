@@ -138,7 +138,13 @@ def load_allcel_spikes(allcel_path: Path) -> tuple[np.ndarray, np.ndarray, np.nd
     with np.load(allcel_path, allow_pickle=False) as za:
         itime_25k = np.asarray(za["allcel__itime_spk"]).ravel()
         id_spk = np.asarray(za["allcel__id_spk"]).ravel().astype(np.int64)
-        id_cel = np.asarray(za["allcel__id_cel"]).ravel().astype(np.int64)
+        if "allcel__id_cel" in za:
+            id_cel_raw = za["allcel__id_cel"]
+        elif "allcel__id_cel__json" in za:
+            id_cel_raw = decode_npz_json_scalar(za["allcel__id_cel__json"])
+        else:
+            raise KeyError(f"{allcel_path} is missing allcel__id_cel / allcel__id_cel__json")
+        id_cel = np.asarray(id_cel_raw).ravel().astype(np.int64)
     return itime_25k, id_spk, id_cel
 
 

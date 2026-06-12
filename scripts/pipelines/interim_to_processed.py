@@ -15,16 +15,12 @@ if not (src_dir / "cellclass").is_dir():
     raise RuntimeError(f"Could not find src/cellclass starting from {THIS_DIR}")
 sys.path.insert(0, str(src_dir))
 
-# Import single-file processor from legacy scripts.
-legacy_dir = THIS_DIR.parent / "legacy"
-if legacy_dir.is_dir():
-    sys.path.insert(0, str(legacy_dir))
-from one_file_processing import extract_one, parse_session_id
+from cellclass.pipeline import extract_one, parse_session_id
 
 
-def iter_npz_files(interim_root: Path):
-    # Your structure: data/interim/VS57/session_date/*.npz
-    yield from sorted(interim_root.rglob("*.npz"))
+def iter_npz_files(interim_root: Path, pattern: str = "*_allcel.npz"):
+    # Cell classification feature extraction expects ratemap/allcel NPZs.
+    yield from sorted(interim_root.rglob(pattern))
 
 
 def outputs_exist(npz_path: Path, processed_root: Path) -> bool:
@@ -42,6 +38,12 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--interim_root", type=str, default="data/interim", help="Root folder containing interim npz files")
     ap.add_argument("--processed_root", type=str, default="data/processed", help="Where to write processed outputs")
+    ap.add_argument(
+        "--pattern",
+        type=str,
+        default="*_allcel.npz",
+        help="Interim NPZ glob to process relative to --interim_root. Defaults to ratemap/allcel files only.",
+    )
     ap.add_argument("--skip_existing", action="store_true", help="Skip sessions already processed")
     ap.add_argument("--dry_run", action="store_true", help="List files without processing")
     # pass-through params for extract_one
@@ -60,8 +62,8 @@ def main():
     interim_root = Path(args.interim_root)
     processed_root = Path(args.processed_root)
 
-    files = list(iter_npz_files(interim_root))
-    print(f"Found {len(files)} npz files under {interim_root}")
+    files = list(iter_npz_files(interim_root, pattern=args.pattern))
+    print(f"Found {len(files)} npz files under {interim_root} matching {args.pattern!r}")
 
     n_ok = 0
     n_skip = 0

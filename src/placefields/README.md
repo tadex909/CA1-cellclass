@@ -22,6 +22,7 @@ This README reflects the current state of:
 1. Convert MATLAB files to interim NPZ:
    - `--mode ratemap` for `*_Ratemap*.mat` -> `*_allcel.npz`
    - `--mode trajdata` for `*_TrajData*.mat` -> `*_trajdata.npz`
+   - `--mode traj_matilde` or `--traj_matilde` for Matilde `*_Bhv0.mat` -> `*_trajdata.npz`
 2. Keep paired files in the same folder:
    - `data/interim/<MOUSE>/<DATE>/<SESSION>_allcel.npz`
    - `data/interim/<MOUSE>/<DATE>/<SESSION>_trajdata.npz`
@@ -50,6 +51,12 @@ This README reflects the current state of:
 - `ratemap` mode exports `allcel__*` plus selected `allpf__ispf_cxu`.
 - `trajdata` mode exports selected `Traj` fields by default:
   - `Cond, time, Wheel, VRtraj, condition, Speed, XSpeed, binSpX, BinSpW, WB, start, stop, tstart, tstop, endVR`
+- `traj_matilde` mode adapts Matilde `bhv` fields from `*_Bhv0.mat`:
+  - trial bounds: `idtrack_tr`
+  - position: `p_x_ds`
+  - speed: `v_x_ds2`
+  - condition block + direction: `icondw_tr`, `way_tr`
+  - behavior frequency: `bhv.prm.freq_d` (100 Hz in the inspected files)
 - You can override Traj export fields with `--traj-fields ...` or use `--traj-fields all`.
 
 Example:
@@ -58,6 +65,16 @@ Example:
 python src/cellclass/mat_to_npz.py `
   --mode trajdata `
   --input data/raw/trajdata `
+  --output data/interim `
+  --recursive
+```
+
+Matilde behavior example:
+
+```powershell
+python src/cellclass/mat_to_npz.py `
+  --traj_matilde `
+  --input data/matlab/Good_sessions_Bayesian_Decoding `
   --output data/interim `
   --recursive
 ```
@@ -106,10 +123,12 @@ python scripts/pipelines/build_ratemap_from_interim.py `
   - optional `pfnull__fr_s_txrep_uxtr` (full null maps, large)
   - optional `pfnull__ssi_null_cur` (full SSI null distributions, large)
   - `run_index.csv` (per-session run status)
-  - `ssi_classification.csv` (one row per `session_id`/`cell_id`/`condition_1b` with `ssi_obs`, `p_value`, `SM`)
+  - `ssi_classification.csv` (one row per `session_id`/`cell_id`/`condition_1b`,
+    with cell type/certainty, `Condition`, `direction`, `ssi_obs`, `p_value`, `SM`)
 - classification controls:
   - `--sm_alpha` (default `0.05`, `SM=True` when `p_value < sm_alpha`)
   - `--classification_csv` (filename/path for the classification CSV)
+  - `--cell_classification_table` (optional cell classification CSV merged by `session_id`/`cell_id`)
 
 Example:
 
@@ -134,6 +153,8 @@ python scripts/pipelines/build_placefield_null_from_interim.py `
 - reconstructs session position/speed vectors and downsamples spike indices
 - uses non-overlapping 150 ms windows by default
 - performs leave-one-lap-out cross-validation within each condition-direction (`condway`) by default
+- supports `--train_all_laps` for an intentionally optimistic decoder that trains on all laps
+  in the same decode group, including the lap being decoded
 - supports `--decode_groupby condway|condition|global`
   - `condway`: train separate maps for each condition and direction (default)
   - `condition`: pool directions within each base condition
@@ -145,6 +166,8 @@ python scripts/pipelines/build_placefield_null_from_interim.py `
 - trains tuning curves from pooled training spike counts divided by pooled dwell
 - computes a memoryless Poisson Bayesian posterior over spatial bins
 - uses all active cells by default; optional `--cell_ids` and `--max_cells` limit the ensemble
+- supports `--cell_selection pyr+sm_inter` to use all pyramidal cells plus interneurons
+  with `SM=True` in at least one processed SSI condition-direction
 - reads condition names from `traj__condition` / `traj__condition__json` when present and records labels such as `PO W`
 - saves:
   - `decode__posterior_wx`
@@ -166,7 +189,8 @@ python scripts/pipelines/build_bayesian_decoder_from_interim.py `
   --out_root results/position_decoding `
   --run_id bayes_tau150ms_bin2cm `
   --decode_groupby condway `
-  --group_condition_families `
+  --train_all_laps `
+  --cell_selection pyr+sm_inter `
   --tau_s 0.150 `
   --bin_size_cm 2.0 `
   --min_speed 2.0
@@ -176,6 +200,8 @@ Notes:
 
 - `--min_speed nan` disables speed filtering and allows sessions without exported speed.
 - Use `--decode_groupby global` as a pooled-map control against the default condition-direction decoder.
+- Leave `--group_condition_families` off to keep `PO`, `PO2`, `PO3`, `PONM`, `POM`, and `PNO`
+  as distinct conditions.
 - Theta/delta filtering is not implemented because the interim trajectory files do not expose that signal.
 - FRV decoding and drop-cell subset repeats are intentionally left for a later stage.
 

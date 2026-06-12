@@ -3,59 +3,35 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-from typing import Optional, List, Dict, Tuple
+import sys
+from typing import List, Dict, Tuple
 
 import numpy as np
 import pandas as pd
 
+THIS_DIR = Path(__file__).resolve().parent
+root = THIS_DIR
+while root != root.parent and not (root / "src" / "cellclass").is_dir():
+    root = root.parent
+src_dir = root / "src"
+if not (src_dir / "cellclass").is_dir():
+    raise RuntimeError(f"Could not find src/cellclass starting from {THIS_DIR}")
+sys.path.insert(0, str(src_dir))
 
-DEFAULT_FEATURES = [
-    "fr_hz",
-    "burst_index",
-    "cv2",
-    "spk_duration_ms",
-    "spk_peaktrough_ms",
-    "spk_asymmetry",
-    "refractory_ms_edge",
-    "acg_peak_latency_ms",
-    "allcel__sm_u_any",
-    "allcel__sm_u_task1",
-    "allcel__sm_u_task2",
-    "allcel__sm_u_task3",
-    "allcel__sm_u_task4",
-    "allcel__sm_u_task5",
-]
+from cellclass.config import (  # noqa: E402
+    DEFAULT_AGE_AGGREGATION_FEATURES,
+    DEFAULT_AGE_GROUPS,
+    age_group_from_age,
+    csv_join,
+)
+from cellclass.validation import validate_age_group_table, validate_feature_table  # noqa: E402
+
+DEFAULT_FEATURES = list(DEFAULT_AGE_AGGREGATION_FEATURES)
 
 
 def normalize_session_name(value: object) -> str:
     """Normalize session identifiers to make schedule matching robust."""
     return " ".join(str(value).strip().split())
-
-
-# def age_group_from_age(age: int) -> Optional[str]:
-#     if age in (15, 16):
-#         return "P15_16"
-#     if age in (17, 18):
-#         return "P17_18"
-#     if age in (19, 20):
-#         return "P19_20"
-#     if age in (21, 22):
-#         return "P21_22"
-#     if age in (23, 24):
-#         return "P23_24"
-#     if age == 25:
-#         return "P25"
-#     return None
-
-def age_group_from_age(age: int) -> Optional[str]:
-    if age in (16, 17, 18):
-        return "P16-18"
-    if age in (19, 20, 21):
-        return "P19-21"
-    if age in (22, 23, 24):
-        return "P22-24"
-    return None
-
 
 
 def load_session_metadata(excel_path: Path) -> pd.DataFrame:
@@ -86,6 +62,7 @@ def load_all_features(processed_root: Path) -> pd.DataFrame:
     dfs = []
     for fp in files:
         df = pd.read_parquet(fp)
+        validate_feature_table(df, source=fp)
         df["features_file"] = fp.name
         df["mouse_dir"] = fp.parent.parent.name  # <mouse>
         dfs.append(df)
@@ -169,7 +146,7 @@ def main() -> None:
     ap.add_argument("--qc", action="store_true", help="Write clean_units with QC filtering")
     ap.add_argument("--qc_strict", action="store_true")
 
-    ap.add_argument("--features", type=str, default=",".join(DEFAULT_FEATURES))
+    ap.add_argument("--features", type=str, default=csv_join(DEFAULT_FEATURES))
     ap.add_argument("--no_log_fr", action="store_true")
     ap.add_argument("--no_standardize", action="store_true")
 
@@ -193,9 +170,7 @@ def main() -> None:
     n_mapped = int(df["age_group"].notna().sum())
     print(f"Loaded {len(df)} units total; mapped to age groups: {n_mapped}")
 
-    # Only write supported age groups
-    # groups = ["P15_16", "P17_18", "P19_20", "P21_22", "P23_24", "P25"]
-    groups = ["P16-18", "P19-21", "P22-24"]
+    groups = list(DEFAULT_AGE_GROUPS)
     feature_cols = [s.strip() for s in args.features.split(",") if s.strip()]
 
     for g in groups:
@@ -203,6 +178,7 @@ def main() -> None:
         if df_g.empty:
             print(f"{g}: no units, skipping")
             continue
+        validate_age_group_table(df_g, source=f"{g} all units", age_group=g)
 
         gdir = outdir / g
         gdir.mkdir(parents=True, exist_ok=True)
@@ -213,6 +189,12 @@ def main() -> None:
         df_clean = df_g
         if args.qc:
             df_clean = apply_qc_filters(df_clean, strict=args.qc_strict)
+        validate_age_group_table(
+            df_clean,
+            source=f"{g} clean units",
+            age_group=g,
+            required_features=feature_cols,
+        )
 
         clean_path = gdir / f"{g}_clean_units.parquet"
         df_clean.to_parquet(clean_path, index=False)

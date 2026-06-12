@@ -5,6 +5,7 @@ import json
 from dataclasses import dataclass
 from itertools import combinations
 from pathlib import Path
+import sys
 from typing import Any
 
 import numpy as np
@@ -16,19 +17,20 @@ from sklearn.metrics import (
 )
 from sklearn.mixture import GaussianMixture
 
+SRC_DIR = Path(__file__).resolve().parents[1]
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
 
-#DEFAULT_AGE_GROUPS = ["P15_16", "P17_18", "P19_20", "P21_22", "P23_24", "P25"]
-DEFAULT_AGE_GROUPS = ["P16-18", "P19-21", "P22-24"]
-DEFAULT_FEATURES = [
-    "fr_hz",
-    "burst_index",
-    "cv2",
-    "spk_duration_ms",
-    "spk_peaktrough_ms",
-    "spk_asymmetry",
-    "refractory_ms_edge",
-    "acg_peak_latency_ms",
-]
+from cellclass.config import (  # noqa: E402
+    DEFAULT_AGE_GROUPS as CONFIG_DEFAULT_AGE_GROUPS,
+    DEFAULT_MODEL_FEATURES,
+    csv_join,
+    parse_csv_list,
+)
+from cellclass.validation import validate_age_group_table  # noqa: E402
+
+DEFAULT_AGE_GROUPS = list(CONFIG_DEFAULT_AGE_GROUPS)
+DEFAULT_FEATURES = list(DEFAULT_MODEL_FEATURES)
 
 
 @dataclass
@@ -38,12 +40,6 @@ class MatrixPack:
     used_cols: list[str]
     rows_before: int
     rows_after: int
-
-
-def parse_csv_list(raw: str | None) -> list[str]:
-    if not raw:
-        return []
-    return [x.strip() for x in raw.split(",") if x.strip()]
 
 
 def iter_feature_subsets(
@@ -286,6 +282,12 @@ def evaluate_age_group(
     df = pd.read_parquet(in_path)
     if "unit_uid" not in df.columns:
         df["unit_uid"] = df["session_id"].astype(str) + "__cell" + df["cell_id"].astype(str)
+    validate_age_group_table(
+        df,
+        source=in_path,
+        age_group=age_group,
+        required_features=feature_pool,
+    )
 
     out_dir = out_root / age_group
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -488,8 +490,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     ap.add_argument("--results_root", type=str, default="results")
     ap.add_argument("--out_root", type=str, default="results/model_selection")
-    ap.add_argument("--age_groups", type=str, default=",".join(DEFAULT_AGE_GROUPS))
-    ap.add_argument("--features", type=str, default=",".join(DEFAULT_FEATURES))
+    ap.add_argument("--age_groups", type=str, default=csv_join(DEFAULT_AGE_GROUPS))
+    ap.add_argument("--features", type=str, default=csv_join(DEFAULT_FEATURES))
     ap.add_argument(
         "--subset_mode",
         type=str,

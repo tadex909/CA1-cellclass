@@ -3,44 +3,29 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import sys
 from typing import Any
 
 import numpy as np
 import pandas as pd
 from sklearn.metrics import silhouette_samples
 
+SRC_DIR = Path(__file__).resolve().parents[1]
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
+
 from fitting import DEFAULT_AGE_GROUPS, DEFAULT_FEATURES, evaluate_gmm, prepare_matrix
-
-
-def normalize_type_u(series: pd.Series) -> pd.Series:
-    """
-    Map external labels to binary convention:
-      0 = interneuron
-      1 = pyramidal
-    """
-    s = series.copy()
-    if pd.api.types.is_numeric_dtype(s):
-        out = pd.to_numeric(s, errors="coerce")
-        out = out.where(out.isin([0, 1]), np.nan)
-        return out.astype("Int64")
-
-    s = s.astype(str).str.strip().str.lower()
-    mapping = {
-        "0": 0,
-        "interneuron": 0,
-        "int": 0,
-        "1": 1,
-        "pyramidal": 1,
-        "pyr": 1,
-    }
-    out = s.map(mapping)
-    return out.astype("Int64")
-
-
-def parse_csv_list(raw: str | None) -> list[str]:
-    if not raw:
-        return []
-    return [x.strip() for x in raw.split(",") if x.strip()]
+from cellclass.config import (  # noqa: E402
+    CELL_TYPE_INTERNEURON,
+    CELL_TYPE_PYRAMIDAL,
+    TYPE_U_INTERNEURON,
+    TYPE_U_PYRAMIDAL,
+    csv_join,
+    normalize_type_u,
+    parse_csv_list,
+    type_u_binary_to_name,
+)
+from cellclass.validation import validate_age_group_table  # noqa: E402
 
 
 def compute_silhouette_samples_safe(X: np.ndarray, labels: np.ndarray) -> np.ndarray:
@@ -79,12 +64,15 @@ def compare_one_age_group(
         return pd.DataFrame()
 
     df = pd.read_parquet(in_path)
-    if "allcel__type_u" not in df.columns:
-        print(f"{age_group}: no allcel__type_u column, skipping")
-        return pd.DataFrame()
-
     if "unit_uid" not in df.columns:
         df["unit_uid"] = df["session_id"].astype(str) + "__cell" + df["cell_id"].astype(str)
+    validate_age_group_table(
+        df,
+        source=in_path,
+        age_group=age_group,
+        required_features=features,
+        require_type_u=True,
+    )
 
     pack = prepare_matrix(df, features, log_fr=log_fr, standardize=standardize)
     if pack.rows_after < min_units:
@@ -125,9 +113,17 @@ def compare_one_age_group(
     d["gmm_margin"] = np.abs(proba[:, interneuron_cluster] - proba[:, pyramidal_cluster])
     d["gmm_silhouette_sample"] = sil_samples
 
-    d["pred_binary"] = np.where(labels == interneuron_cluster, 0, 1).astype("int64")
-    d["pred_type"] = np.where(d["pred_binary"] == 0, "interneuron", "pyramidal")
-    d["type_u_type"] = np.where(d["type_u_binary"] == 0, "interneuron", "pyramidal")
+    d["pred_binary"] = np.where(
+        labels == interneuron_cluster,
+        TYPE_U_INTERNEURON,
+        TYPE_U_PYRAMIDAL,
+    ).astype("int64")
+    d["pred_type"] = np.where(
+        d["pred_binary"] == TYPE_U_INTERNEURON,
+        CELL_TYPE_INTERNEURON,
+        CELL_TYPE_PYRAMIDAL,
+    )
+    d["type_u_type"] = type_u_binary_to_name(d["type_u_binary"])
 
     valid_cmp = d["type_u_binary"].notna()
     d["comparable"] = valid_cmp
@@ -281,8 +277,8 @@ def main() -> None:
     )
     ap.add_argument("--results_root", type=str, default="results")
     ap.add_argument("--out_root", type=str, default="results/type_u_comparison")
-    ap.add_argument("--age_groups", type=str, default=",".join(DEFAULT_AGE_GROUPS))
-    ap.add_argument("--features", type=str, default=",".join(DEFAULT_FEATURES))
+    ap.add_argument("--age_groups", type=str, default=csv_join(DEFAULT_AGE_GROUPS))
+    ap.add_argument("--features", type=str, default=csv_join(DEFAULT_FEATURES))
     ap.add_argument("--no_log_fr", action="store_true")
     ap.add_argument("--no_standardize", action="store_true")
     ap.add_argument("--random_state", type=int, default=0)

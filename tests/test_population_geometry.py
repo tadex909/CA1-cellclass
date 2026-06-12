@@ -85,8 +85,22 @@ def _save_synthetic_classification_csv(csv_path: Path) -> None:
     pd.DataFrame(
         [
             {"session_id": "S1", "cell_id": 10, "pred_type": "pyramidal", "age_group": "P16-18"},
-            {"session_id": "S1", "cell_id": 11, "pred_type": "interneuron", "age_group": "P16-18"},
-            {"session_id": "S2", "cell_id": 20, "pred_type": "pyramidal", "age_group": "P19-21"},
+            {
+                "session_id": "S1",
+                "cell_id": 11,
+                "pred_type": "interneuron",
+                "age_group": "P16-18",
+                "gmm_p_interneuron": 0.91,
+                "gmm_p_pyramidal": 0.09,
+            },
+            {
+                "session_id": "S2",
+                "cell_id": 20,
+                "pred_type": "pyramidal",
+                "age_group": "P19-21",
+                "gmm_p_interneuron": 0.47,
+                "gmm_p_pyramidal": 0.53,
+            },
         ]
     ).to_csv(csv_path, index=False)
 
@@ -500,8 +514,28 @@ class PopulationGeometryTest(unittest.TestCase):
             _save_synthetic_classification_csv(root / "P16-18" / "p16_18_classification_info.csv")
             table = load_cell_classification_table(root)
 
-            self.assertEqual(table.columns.tolist(), ["session_id", "cell_id", "pred_type", "age_group"])
+            self.assertEqual(
+                table.columns.tolist(),
+                [
+                    "session_id",
+                    "cell_id",
+                    "pred_type",
+                    "p_pred_type",
+                    "Sure (P(pred_type) > 0.6)",
+                    "age_group",
+                ],
+            )
             self.assertEqual(len(table), 3)
+            self.assertAlmostEqual(
+                float(table.loc[table["cell_id"] == 11, "p_pred_type"].iloc[0]),
+                0.91,
+            )
+            self.assertAlmostEqual(
+                float(table.loc[table["cell_id"] == 20, "p_pred_type"].iloc[0]),
+                0.53,
+            )
+            self.assertTrue(bool(table.loc[table["cell_id"] == 11, "Sure (P(pred_type) > 0.6)"].iloc[0]))
+            self.assertFalse(bool(table.loc[table["cell_id"] == 20, "Sure (P(pred_type) > 0.6)"].iloc[0]))
 
             selected = filter_cell_ids_by_pred_type(
                 session_id="S1",

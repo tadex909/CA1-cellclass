@@ -11,43 +11,20 @@ import pandas as pd
 from sklearn.metrics import adjusted_rand_score
 
 from fitting import DEFAULT_FEATURES, evaluate_gmm, prepare_matrix
-
-
-def parse_csv_list(raw: str | None) -> list[str]:
-    if not raw:
-        return []
-    return [x.strip() for x in raw.split(",") if x.strip()]
+from cellclass.config import (  # noqa: E402
+    TYPE_U_INTERNEURON,
+    TYPE_U_PYRAMIDAL,
+    csv_join,
+    normalize_type_u,
+    parse_csv_list,
+)
+from cellclass.validation import validate_age_group_table  # noqa: E402
 
 
 def parse_int_list(raw: str | None, default: list[int]) -> list[int]:
     if not raw:
         return default
     return [int(x.strip()) for x in raw.split(",") if x.strip()]
-
-
-def normalize_type_u(series: pd.Series) -> pd.Series:
-    """
-    Standardize type_u to:
-      0 = interneuron
-      1 = pyramidal
-    """
-    s = series.copy()
-    if pd.api.types.is_numeric_dtype(s):
-        out = pd.to_numeric(s, errors="coerce")
-        out = out.where(out.isin([0, 1]), np.nan)
-        return out.astype("Int64")
-
-    s = s.astype(str).str.strip().str.lower()
-    mapping = {
-        "0": 0,
-        "interneuron": 0,
-        "int": 0,
-        "1": 1,
-        "pyramidal": 1,
-        "pyr": 1,
-    }
-    out = s.map(mapping)
-    return out.astype("Int64")
 
 
 def iter_feature_subsets(features: list[str], mode: str, min_subset_size: int) -> list[list[str]]:
@@ -121,7 +98,11 @@ def evaluate_run(
     pyramidal_cluster = 1 - interneuron_cluster
 
     d["type_u_binary"] = normalize_type_u(d["allcel__type_u"]) if "allcel__type_u" in d.columns else pd.Series([pd.NA] * len(d), index=d.index, dtype="Int64")
-    d["pred_binary"] = np.where(labels == interneuron_cluster, 0, 1).astype("int64")
+    d["pred_binary"] = np.where(
+        labels == interneuron_cluster,
+        TYPE_U_INTERNEURON,
+        TYPE_U_PYRAMIDAL,
+    ).astype("int64")
     d["gmm_cluster"] = labels.astype("int64")
     d["gmm_p_interneuron"] = proba[:, interneuron_cluster]
     d["gmm_p_pyramidal"] = proba[:, pyramidal_cluster]
@@ -215,7 +196,7 @@ def main() -> None:
     ap.add_argument("--results_root", type=str, default="results")
     ap.add_argument("--out_root", type=str, default="results/stability")
     ap.add_argument("--age_group", type=str, required=True)
-    ap.add_argument("--features", type=str, default=",".join(DEFAULT_FEATURES))
+    ap.add_argument("--features", type=str, default=csv_join(DEFAULT_FEATURES))
     ap.add_argument(
         "--subset_mode",
         type=str,
@@ -247,6 +228,12 @@ def main() -> None:
         df["unit_uid"] = df["session_id"].astype(str) + "__cell" + df["cell_id"].astype(str)
 
     features = parse_csv_list(args.features) or DEFAULT_FEATURES
+    validate_age_group_table(
+        df,
+        source=in_path,
+        age_group=args.age_group,
+        required_features=features,
+    )
     seeds = parse_int_list(args.seeds, default=[0])
     subsets = iter_feature_subsets(features, args.subset_mode, min_subset_size=args.min_subset_size)
 
@@ -393,4 +380,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

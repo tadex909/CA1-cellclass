@@ -28,6 +28,7 @@ class BayesianDecoderConfig:
     rate_floor_hz: float = 1e-12
     decode_groupby: DecodeGroupBy = "condway"
     group_condition_families: bool = False
+    train_all_laps: bool = False
 
     def validate(self) -> None:
         if not np.isfinite(self.freq_hz) or self.freq_hz <= 0:
@@ -404,7 +405,11 @@ def decode_bayesian_position_from_trials(
     condition_names_by_base: Mapping[int, str] | None = None,
 ) -> BayesianDecodingResult:
     """
-    Decode position with a leave-one-lap-out memoryless Bayesian decoder.
+    Decode position with a memoryless Bayesian decoder.
+
+    By default, each lap is decoded using maps trained on other laps in the
+    same decode group. Set ``cfg.train_all_laps=True`` to train on all laps in
+    the same group, including the lap being decoded.
     """
 
     cfg.validate()
@@ -502,10 +507,11 @@ def decode_bayesian_position_from_trials(
     n_train_laps_w: list[int] = []
 
     for t, tr in enumerate(trials):
-        train_idx = np.where(
-            (train_group_t == int(train_group_t[t]))
-            & (np.arange(train_group_t.size) != t)
-        )[0]
+        same_group = train_group_t == int(train_group_t[t])
+        if bool(cfg.train_all_laps):
+            train_idx = np.where(same_group)[0]
+        else:
+            train_idx = np.where(same_group & (np.arange(train_group_t.size) != t))[0]
         if train_idx.size == 0:
             continue
 
