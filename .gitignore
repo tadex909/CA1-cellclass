@@ -22,3 +22,4 @@ results/*
 # MATLAB project metadata/cache
 resources/project/
 resources/project/**
+src/neurocode/*

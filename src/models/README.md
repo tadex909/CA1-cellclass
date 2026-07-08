@@ -7,8 +7,9 @@ This folder contains model-selection code for unsupervised cell-type clustering.
 - `fitting.py`: systematic Gaussian Mixture Model (GMM) search across:
   - different numbers of clusters (`k`)
   - different feature subsets (including `n` vs `n-1` features)
-- `compare_type_u.py`: fixed 2-cluster GMM on all features, then comparison against
-  external labels `allcel__type_u` (`0=interneuron`, `1=pyramidal`).
+- `compare_type_u.py`: fixed 2-cluster GMM on the current canonical Valero
+  feature set, then comparison against external labels `allcel__type_u`
+  (`0=interneuron`, `1=pyramidal`).
 
 It is designed to run on age-group datasets already produced in `results/<AGE>/<AGE>_clean_units.parquet`.
 
@@ -43,7 +44,7 @@ For each age group:
 Run from repository root:
 
 ```powershell
-python src/models/fitting.py `
+python -m models.fitting `
   --results_root results `
   --out_root results/model_selection `
   --subset_mode leave_one_out `
@@ -99,7 +100,7 @@ Given your current sample sizes (roughly `P25` smallest, `P17_18`/`P23_24` large
 Suggested baseline run:
 
 ```powershell
-python src/models/fitting.py `
+python -m models.fitting `
   --results_root results `
   --out_root results/model_selection `
   --subset_mode leave_one_out `
@@ -112,7 +113,7 @@ python src/models/fitting.py `
 For a stricter stability pass:
 
 ```powershell
-python src/models/fitting.py `
+python -m models.fitting `
   --results_root results `
   --out_root results/model_selection_strict `
   --subset_mode leave_one_out `
@@ -128,7 +129,8 @@ Use `compare_type_u.py` when you want a direct benchmark of GMM-vs-`type_u` agre
 
 What it does:
 
-1. Uses all default features from `fitting.py`.
+1. Uses the canonical Valero feature set by default:
+   `cv2, acg_peak_latency_ms, spk_duration_ms, spk_asymmetry, log_fr_hz_session`.
 2. Fits a 2-cluster GMM (`k=2`) for each age group.
 3. Maps clusters to classes using `spk_duration_ms`:
    - shorter duration cluster => `interneuron`
@@ -139,21 +141,22 @@ What it does:
 Example:
 
 ```powershell
-python src/models/compare_type_u.py `
+python -m models.compare_type_u `
   --results_root results `
-  --out_root results/type_u_comparison `
-  --n_init 10
+  --out_root results/type_u_comparison_valero_feats_3
 ```
 
 Main outputs:
 
-- `results/type_u_comparison/summary.json`
-- `results/type_u_comparison/discrepancies_by_age.csv`
-- `results/type_u_comparison/discrepancies_by_session.csv`
-- `results/type_u_comparison/discrepant_neurons.parquet`
-- `results/type_u_comparison/discrepant_neurons_top500.csv`
+- `results/type_u_comparison_valero_feats_3/summary.json`
+- `results/type_u_comparison_valero_feats_3/all_age_groups_gmm2_vs_type_u.parquet`
+- `results/type_u_comparison_valero_feats_3/cell_classification_table.csv`
+- `results/type_u_comparison_valero_feats_3/discrepancies_by_age.csv`
+- `results/type_u_comparison_valero_feats_3/discrepancies_by_session.csv`
+- `results/type_u_comparison_valero_feats_3/discrepant_neurons.parquet`
+- `results/type_u_comparison_valero_feats_3/discrepant_neurons_top500.csv`
 - per-age tables:
-  - `results/type_u_comparison/<AGE>/<AGE>_gmm2_vs_type_u.parquet`
+  - `results/type_u_comparison_valero_feats_3/<AGE>/<AGE>_gmm2_vs_type_u.parquet`
 
 ## What Is `discrepant_neurons_top500.csv`?
 

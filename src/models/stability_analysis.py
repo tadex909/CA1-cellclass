@@ -10,15 +10,15 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import adjusted_rand_score
 
-from fitting import DEFAULT_FEATURES, evaluate_gmm, prepare_matrix
-from cellclass.config import (  # noqa: E402
+from cellclass.config import (
     TYPE_U_INTERNEURON,
     TYPE_U_PYRAMIDAL,
     csv_join,
     normalize_type_u,
     parse_csv_list,
 )
-from cellclass.validation import validate_age_group_table  # noqa: E402
+from cellclass.validation import validate_age_group_table
+from .fitting import DEFAULT_FEATURES, evaluate_gmm, prepare_matrix
 
 
 def parse_int_list(raw: str | None, default: list[int]) -> list[int]:

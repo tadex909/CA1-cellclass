@@ -3,18 +3,14 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-import sys
 
 import numpy as np
 import pandas as pd
 
-SRC_DIR = Path(__file__).resolve().parents[1]
-if str(SRC_DIR) not in sys.path:
-    sys.path.insert(0, str(SRC_DIR))
-
-from cellclass.config import (  # noqa: E402
+from cellclass.config import (
     CELL_TYPE_INTERNEURON,
     CELL_TYPE_PYRAMIDAL,
+    DEFAULT_TYPE_U_COMPARISON_ROOT,
     TYPE_U_INTERNEURON,
     normalize_type_u,
     parse_csv_list,
@@ -200,7 +196,7 @@ def main() -> None:
     ap.add_argument(
         "--comparison_root",
         type=str,
-        default="results/type_u_comparison_valero_feats_3",
+        default=DEFAULT_TYPE_U_COMPARISON_ROOT,
     )
     ap.add_argument(
         "--out_xlsx",

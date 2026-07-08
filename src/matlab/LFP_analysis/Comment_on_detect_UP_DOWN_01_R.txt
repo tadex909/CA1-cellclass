@@ -1,0 +1,24 @@
+t is a variable the number of columns is corresponding to the number of sliding windows of the spectrogram. The value corresponding 
+to the time in sec at wich the window starts.
+
+SOIndex assign at each sliding window a value 0 if the sum of the power in this window is inferior than a threshold and 1 if its superior to the 
+threshold.
+
+SOTimes is the multiplication of the time of the sliding windows by the value of the index it thus keeps only those values of t for 
+the window which had a power higher than the threshold (e.g. a value of 1 in the SOIndex.
+ 
+TemplateAroundDetected create a series of number from - 100 ms(-2000 samples) to + 100 ms (+2000 samples) in steps of 1 sample.
+
+SOTimeMatrix redistribute the SOTimes (expressed now in samples e.g. * SF) in a matrix with as many columns as the TemplateAroundDetected variable thus it has as many lines as the numbers 
+of values for SOTimes.
+
+Template around detected redistribute the values of TemplateAroundDetected variable in a matrix having as many lines as SOTimes, 
+it thus have as many columns as the TemplateAroundDetected variable.
+
+New SOTimeMatrix is the addition of the SOTimeMatrix and TemplateAroundDetected matrix. It generates a window of points from -100 ms to + 100 ms 
+around each time point detected as the startpoint of the 200ms window with higher than threshold SOPowervalue (e.g. index ==1). 
+
+AllSOTimes put all the rows of SOTimeMatrix next to each other. Their might be some gaps corresponding to periods with SO Power not higher than threshold.
+Unique is used to eliminate values which are identicals.
+
+ThoseSamples only adds the last time point of the dataset to AllSOTimes.

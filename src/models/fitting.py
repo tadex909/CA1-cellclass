@@ -5,7 +5,6 @@ import json
 from dataclasses import dataclass
 from itertools import combinations
 from pathlib import Path
-import sys
 from typing import Any
 
 import numpy as np
@@ -17,17 +16,13 @@ from sklearn.metrics import (
 )
 from sklearn.mixture import GaussianMixture
 
-SRC_DIR = Path(__file__).resolve().parents[1]
-if str(SRC_DIR) not in sys.path:
-    sys.path.insert(0, str(SRC_DIR))
-
-from cellclass.config import (  # noqa: E402
+from cellclass.config import (
     DEFAULT_AGE_GROUPS as CONFIG_DEFAULT_AGE_GROUPS,
     DEFAULT_MODEL_FEATURES,
     csv_join,
     parse_csv_list,
 )
-from cellclass.validation import validate_age_group_table  # noqa: E402
+from cellclass.validation import validate_age_group_table
 
 DEFAULT_AGE_GROUPS = list(CONFIG_DEFAULT_AGE_GROUPS)
 DEFAULT_FEATURES = list(DEFAULT_MODEL_FEATURES)

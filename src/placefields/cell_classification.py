@@ -12,14 +12,68 @@ COMPACT_CLASSIFICATION_COLUMNS = (
     "session_id",
     "cell_id",
     "pred_type",
+    "u_type",
     "p_pred_type",
     CONFIDENT_PRED_TYPE_COLUMN,
     "age_group",
 )
 
 
+def read_classification_frame(path: Path) -> pd.DataFrame:
+    suffix = path.suffix.lower()
+    if suffix == ".parquet":
+        return pd.read_parquet(path)
+    if suffix == ".csv":
+        return pd.read_csv(path)
+    raise ValueError(f"Unsupported classification file type: {path}")
+
+
 def _normalize_pred_type(value: object) -> str:
     return str(value).strip().lower()
+
+
+def _normalize_u_type_series(values: pd.Series) -> pd.Series:
+    """
+    Normalize legacy allcel type_u labels to readable cell-type names.
+
+    The original allcel convention is:
+      0 = interneuron
+      1 = pyramidal
+    """
+    if pd.api.types.is_numeric_dtype(values):
+        numeric = pd.to_numeric(values, errors="coerce")
+        out = numeric.map({0: "interneuron", 1: "pyramidal"})
+        return out.astype("string")
+
+    text = values.astype(str).str.strip().str.lower()
+    out = text.map(
+        {
+            "0": "interneuron",
+            "interneuron": "interneuron",
+            "int": "interneuron",
+            "1": "pyramidal",
+            "pyramidal": "pyramidal",
+            "pyr": "pyramidal",
+        }
+    )
+    return out.astype("string")
+
+
+def _add_legacy_u_type(out: pd.DataFrame) -> pd.DataFrame:
+    u_type = pd.Series(pd.NA, index=out.index, dtype="string")
+
+    if "u_type" in out.columns:
+        u_type = u_type.fillna(_normalize_u_type_series(out["u_type"]))
+
+    for source_col in ("type_u_type", "type_u_binary", "allcel__type_u"):
+        if source_col in out.columns:
+            u_type = u_type.fillna(_normalize_u_type_series(out[source_col]))
+
+    if u_type.notna().any():
+        out["u_type"] = u_type
+        return out
+
+    return out
 
 
 def _add_pred_type_probability(out: pd.DataFrame) -> pd.DataFrame:
@@ -60,24 +114,11 @@ def _prepare_classification_frame(d: pd.DataFrame, *, source_label: str) -> pd.D
     out = out.loc[out["pred_type"] != ""].copy()
     out["cell_id"] = out["cell_id"].astype(np.int64)
     out = _add_pred_type_probability(out)
+    out = _add_legacy_u_type(out)
     return out
 
 
-def load_cell_classification_table(source: str | Path) -> pd.DataFrame:
-    src = Path(source)
-    if src.is_file():
-        frames = [_prepare_classification_frame(pd.read_csv(src), source_label=str(src))]
-    elif src.is_dir():
-        csv_paths = sorted(src.rglob("*_classification_info.csv"))
-        if not csv_paths:
-            raise FileNotFoundError(f"No *_classification_info.csv files found under {src}")
-        frames = [
-            _prepare_classification_frame(pd.read_csv(csv_path), source_label=str(csv_path))
-            for csv_path in csv_paths
-        ]
-    else:
-        raise FileNotFoundError(f"Classification source does not exist: {src}")
-
+def _merge_classification_frames(frames: list[pd.DataFrame]) -> pd.DataFrame:
     merged = pd.concat(frames, ignore_index=True)
     if merged.empty:
         return pd.DataFrame(columns=[c for c in COMPACT_CLASSIFICATION_COLUMNS if c != "age_group"])
@@ -101,6 +142,82 @@ def load_cell_classification_table(source: str | Path) -> pd.DataFrame:
     merged = merged.drop_duplicates(subset=["session_id", "cell_id"], keep="first")
     merged = merged.sort_values(["session_id", "cell_id"], kind="stable").reset_index(drop=True)
     return merged
+
+
+def compact_cell_classification_table(
+    df: pd.DataFrame,
+    *,
+    source_label: str = "<dataframe>",
+) -> pd.DataFrame:
+    return _merge_classification_frames(
+        [_prepare_classification_frame(df, source_label=source_label)]
+    )
+
+
+def _comparison_frame_from_parquet(path: Path) -> pd.DataFrame:
+    d = pd.read_parquet(path)
+    if "age_group" not in d.columns and path.name.endswith("_gmm2_vs_type_u.parquet"):
+        d["age_group"] = path.parent.name
+    return d
+
+
+def _classification_frames_from_directory(src: Path) -> list[pd.DataFrame]:
+    all_comparison_path = src / "all_age_groups_gmm2_vs_type_u.parquet"
+    if all_comparison_path.exists():
+        return [
+            _prepare_classification_frame(
+                _comparison_frame_from_parquet(all_comparison_path),
+                source_label=str(all_comparison_path),
+            )
+        ]
+
+    comparison_paths = [
+        path
+        for path in sorted(src.rglob("*_gmm2_vs_type_u.parquet"))
+        if path.name != "all_age_groups_gmm2_vs_type_u.parquet"
+    ]
+    if comparison_paths:
+        return [
+            _prepare_classification_frame(
+                _comparison_frame_from_parquet(path),
+                source_label=str(path),
+            )
+            for path in comparison_paths
+        ]
+
+    csv_paths = sorted(src.rglob("*_classification_info.csv"))
+    if csv_paths:
+        return [
+            _prepare_classification_frame(pd.read_csv(csv_path), source_label=str(csv_path))
+            for csv_path in csv_paths
+        ]
+
+    compact_csv = src / "cell_classification_table.csv"
+    if compact_csv.exists():
+        return [
+            _prepare_classification_frame(pd.read_csv(compact_csv), source_label=str(compact_csv))
+        ]
+
+    raise FileNotFoundError(
+        "No classification files found under "
+        f"{src}. Expected all_age_groups_gmm2_vs_type_u.parquet, "
+        "*_gmm2_vs_type_u.parquet, *_classification_info.csv, or "
+        "cell_classification_table.csv."
+    )
+
+
+def load_cell_classification_table(source: str | Path) -> pd.DataFrame:
+    src = Path(source)
+    if src.is_file():
+        frames = [
+            _prepare_classification_frame(read_classification_frame(src), source_label=str(src))
+        ]
+    elif src.is_dir():
+        frames = _classification_frames_from_directory(src)
+    else:
+        raise FileNotFoundError(f"Classification source does not exist: {src}")
+
+    return _merge_classification_frames(frames)
 
 
 def filter_cell_ids_by_pred_type(

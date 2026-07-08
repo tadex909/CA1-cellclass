@@ -9,6 +9,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+from cellclass.config import DEFAULT_TYPE_U_COMPARISON_ROOT, DEFAULT_TYPE_U_REVIEW_ROOT
+
 
 def parse_csv_list(raw: str | None) -> list[str]:
     if not raw:
@@ -193,10 +195,10 @@ def main() -> None:
             "Create per-neuron review artifacts for disagreements between type_u and GMM labels."
         )
     )
-    ap.add_argument("--comparison_root", type=str, default="results/type_u_comparison")
+    ap.add_argument("--comparison_root", type=str, default=DEFAULT_TYPE_U_COMPARISON_ROOT)
     ap.add_argument("--interim_root", type=str, default="data/interim")
     ap.add_argument("--processed_root", type=str, default="data/processed")
-    ap.add_argument("--out_root", type=str, default="results/type_u_comparison/review")
+    ap.add_argument("--out_root", type=str, default=DEFAULT_TYPE_U_REVIEW_ROOT)
     ap.add_argument("--ages", type=str, default="")
     ap.add_argument("--top_n", type=int, default=0, help="0 means all discrepant neurons")
     ap.add_argument("--waveform_fs_hz", type=float, default=25000.0)

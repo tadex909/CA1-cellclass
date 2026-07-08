@@ -6,18 +6,15 @@ population-geometry summaries on the normalized `0-100` linear track.
 ## Conventions
 
 - Track coordinates are in normalized physical track units from `0` to `100`.
-- The first `10` track units are excluded from zone-based rich/poor analyses.
 - Cue-rich spans are recorded as continuous spatial intervals.
-- Excluded spans are labeled as neither rich nor poor.
+- Excluded spans, when present, are labeled as neither rich nor poor.
 - Cue-poor spans are defined as the complement of cue-rich spans plus excluded spans on the track.
 - For lag-profile analyses, bins are usually labeled by the zone containing the
   bin center.
 - Component-wise labels are also available when the contiguous patches should be
   kept separate, for example `rich_1`, `rich_2`, `poor_1`, `poor_2`, and so on.
 
-Canonical excluded span for all condition families:
-
-- `0` to `10`
+There is currently no canonical excluded span for the PO/POM/PNO layouts.
 
 ## PO Family
 
@@ -30,8 +27,8 @@ The `PO` family includes:
 
 Canonical cue-rich spans:
 
-- `13` to `43`
-- `81` to `96`
+- `0` to `43`
+- `81` to `100`
 
 Canonical object centers:
 
@@ -41,17 +38,13 @@ Canonical object centers:
 
 The resulting cue-poor spans are:
 
-- `10` to `13`
 - `43` to `81`
-- `96` to `100`
 
 Component labels for `PO` therefore map to:
 
-- `rich_1`: `13` to `43`
-- `rich_2`: `81` to `96`
-- `poor_1`: `10` to `13`
-- `poor_2`: `43` to `81`
-- `poor_3`: `96` to `100`
+- `rich_1`: `0` to `43`
+- `rich_2`: `81` to `100`
+- `poor_1`: `43` to `81`
 
 ## POM Family
 
@@ -64,8 +57,8 @@ Relative to `PO`, the second object is moved to `100 - 36 = 64`.
 
 Canonical cue-rich spans:
 
-- `13` to `28`
-- `57` to `96`
+- `0` to `28`
+- `57` to `100`
 
 Canonical object centers:
 
@@ -75,25 +68,21 @@ Canonical object centers:
 
 The resulting cue-poor spans are:
 
-- `10` to `13`
 - `28` to `57`
-- `96` to `100`
 
 Component labels for `POM` therefore map to:
 
-- `rich_1`: `13` to `28`
-- `rich_2`: `57` to `96`
-- `poor_1`: `10` to `13`
-- `poor_2`: `28` to `57`
-- `poor_3`: `96` to `100`
+- `rich_1`: `0` to `28`
+- `rich_2`: `57` to `100`
+- `poor_1`: `28` to `57`
 
 ## PNO
 
 `PNO` has no objects and therefore no cue-rich spans.
 
 - cue-rich spans: none
-- excluded span: `0` to `10`
-- cue-poor span: `10` to `100`
+- excluded span: none
+- cue-poor span: `0` to `100`
 
 ## Recommended Use In Comparisons
 

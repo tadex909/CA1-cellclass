@@ -49,6 +49,15 @@ DEFAULT_MOUSE_AGGREGATION_FEATURES: tuple[str, ...] = (
     "type_u",
 )
 
+DEFAULT_TYPE_U_COMPARISON_FEATURES: tuple[str, ...] = (
+    "cv2",
+    "acg_peak_latency_ms",
+    "spk_duration_ms",
+    "spk_asymmetry",
+    "log_fr_hz_session",
+)
+DEFAULT_TYPE_U_COMPARISON_N_INIT = 15
+
 FEATURE_SET_EXPERIMENTS: dict[str, tuple[str, ...]] = {
     "all_features": DEFAULT_MODEL_FEATURES,
     "some_features": (
@@ -63,14 +72,14 @@ FEATURE_SET_EXPERIMENTS: dict[str, tuple[str, ...]] = {
         "spk_duration_ms",
         "refractory_ms_edge",
     ),
-    "valero_features": (
-        "cv2",
-        "acg_peak_latency_ms",
-        "spk_duration_ms",
-        "spk_asymmetry",
-        "fr_hz",
-    ),
+    "valero_features": DEFAULT_TYPE_U_COMPARISON_FEATURES,
 }
+
+DEFAULT_TYPE_U_COMPARISON_ROOT = "results/type_u_comparison_valero_feats_3"
+DEFAULT_CELL_CLASSIFICATION_TABLE = (
+    f"{DEFAULT_TYPE_U_COMPARISON_ROOT}/cell_classification_table.csv"
+)
+DEFAULT_TYPE_U_REVIEW_ROOT = f"{DEFAULT_TYPE_U_COMPARISON_ROOT}/review"
 
 TYPE_U_INTERNEURON = 0
 TYPE_U_PYRAMIDAL = 1

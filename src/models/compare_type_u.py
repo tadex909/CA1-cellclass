@@ -3,21 +3,18 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-import sys
 from typing import Any
 
 import numpy as np
 import pandas as pd
 from sklearn.metrics import silhouette_samples
 
-SRC_DIR = Path(__file__).resolve().parents[1]
-if str(SRC_DIR) not in sys.path:
-    sys.path.insert(0, str(SRC_DIR))
-
-from fitting import DEFAULT_AGE_GROUPS, DEFAULT_FEATURES, evaluate_gmm, prepare_matrix
-from cellclass.config import (  # noqa: E402
+from cellclass.config import (
     CELL_TYPE_INTERNEURON,
     CELL_TYPE_PYRAMIDAL,
+    DEFAULT_TYPE_U_COMPARISON_FEATURES,
+    DEFAULT_TYPE_U_COMPARISON_N_INIT,
+    DEFAULT_TYPE_U_COMPARISON_ROOT,
     TYPE_U_INTERNEURON,
     TYPE_U_PYRAMIDAL,
     csv_join,
@@ -25,7 +22,9 @@ from cellclass.config import (  # noqa: E402
     parse_csv_list,
     type_u_binary_to_name,
 )
-from cellclass.validation import validate_age_group_table  # noqa: E402
+from cellclass.validation import validate_age_group_table
+from placefields.cell_classification import compact_cell_classification_table
+from .fitting import DEFAULT_AGE_GROUPS, evaluate_gmm, prepare_matrix
 
 
 def compute_silhouette_samples_safe(X: np.ndarray, labels: np.ndarray) -> np.ndarray:
@@ -272,17 +271,17 @@ def build_summaries(df_all: pd.DataFrame, out_root: Path) -> None:
 def main() -> None:
     ap = argparse.ArgumentParser(
         description=(
-            "Run fixed 2-cluster GMM (all features) for each age group and compare with allcel__type_u."
+            "Run fixed 2-cluster GMM for each age group and compare with allcel__type_u."
         )
     )
     ap.add_argument("--results_root", type=str, default="results")
-    ap.add_argument("--out_root", type=str, default="results/type_u_comparison")
+    ap.add_argument("--out_root", type=str, default=DEFAULT_TYPE_U_COMPARISON_ROOT)
     ap.add_argument("--age_groups", type=str, default=csv_join(DEFAULT_AGE_GROUPS))
-    ap.add_argument("--features", type=str, default=csv_join(DEFAULT_FEATURES))
+    ap.add_argument("--features", type=str, default=csv_join(DEFAULT_TYPE_U_COMPARISON_FEATURES))
     ap.add_argument("--no_log_fr", action="store_true")
     ap.add_argument("--no_standardize", action="store_true")
     ap.add_argument("--random_state", type=int, default=0)
-    ap.add_argument("--n_init", type=int, default=10)
+    ap.add_argument("--n_init", type=int, default=DEFAULT_TYPE_U_COMPARISON_N_INIT)
     ap.add_argument(
         "--covariance_type",
         type=str,
@@ -297,7 +296,7 @@ def main() -> None:
     out_root.mkdir(parents=True, exist_ok=True)
 
     age_groups = parse_csv_list(args.age_groups) or DEFAULT_AGE_GROUPS
-    features = parse_csv_list(args.features) or DEFAULT_FEATURES
+    features = parse_csv_list(args.features) or list(DEFAULT_TYPE_U_COMPARISON_FEATURES)
 
     cfg = {
         "results_root": str(results_root),
@@ -334,6 +333,11 @@ def main() -> None:
     df_all = pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()
     if not df_all.empty:
         df_all.to_parquet(out_root / "all_age_groups_gmm2_vs_type_u.parquet", index=False)
+        cell_table = compact_cell_classification_table(
+            df_all,
+            source_label="all age groups GMM-vs-type_u comparison",
+        )
+        cell_table.to_csv(out_root / "cell_classification_table.csv", index=False)
     build_summaries(df_all, out_root)
     print("Done.")
 

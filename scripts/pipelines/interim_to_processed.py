@@ -2,18 +2,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-import sys
 import traceback
-
-# --- sys.path hack (so scripts/ works without pip install -e .)
-THIS_DIR = Path(__file__).resolve().parent
-root = THIS_DIR
-while root != root.parent and not (root / "src" / "cellclass").is_dir():
-    root = root.parent
-src_dir = root / "src"
-if not (src_dir / "cellclass").is_dir():
-    raise RuntimeError(f"Could not find src/cellclass starting from {THIS_DIR}")
-sys.path.insert(0, str(src_dir))
 
 from cellclass.pipeline import extract_one, parse_session_id
 

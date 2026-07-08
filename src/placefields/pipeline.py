@@ -18,6 +18,7 @@ class RatemapConfig:
     xbin_rem: int = 0
     nb_cond: int | None = None
     min_speed: float | None = 2.0
+    min_dwell_s: float = 0.0
 
     def validate(self) -> None:
         if self.freq_hz <= 0:
@@ -30,6 +31,8 @@ class RatemapConfig:
             raise ValueError("nb_cond must be >= 1 when provided")
         if self.min_speed is not None and not np.isfinite(self.min_speed):
             raise ValueError("min_speed must be finite when provided")
+        if not np.isfinite(self.min_dwell_s) or self.min_dwell_s < 0:
+            raise ValueError("min_dwell_s must be finite and >= 0")
 
 
 @dataclass(frozen=True)
@@ -127,6 +130,54 @@ def build_default_xbin(position_x: np.ndarray) -> np.ndarray:
     if edges[-1] < maxmaze:
         edges = np.append(edges, maxmaze)
     return edges
+
+
+def _rate_from_counts_and_dwell(
+    counts: np.ndarray,
+    dwell: np.ndarray,
+    *,
+    min_dwell_s: float,
+) -> np.ndarray:
+    """
+    Divide spike counts by dwell, masking unstable low-occupancy bins.
+    """
+    c = np.asarray(counts, dtype=np.float64)
+    d = np.asarray(dwell, dtype=np.float64)
+    if c.ndim != 3:
+        raise ValueError(f"counts must be 3D (cell, trial, bin), got shape {c.shape}")
+    if d.shape != c.shape[1:]:
+        raise ValueError(f"dwell shape {d.shape} must match counts trial/bin shape {c.shape[1:]}")
+
+    min_dwell = float(min_dwell_s)
+    valid = np.isfinite(d) & (d > 0.0)
+    if min_dwell > 0.0:
+        valid &= d >= min_dwell
+
+    return np.divide(
+        c,
+        d[None, :, :],
+        out=np.full_like(c, np.nan, dtype=np.float64),
+        where=valid[None, :, :],
+    )
+
+
+def _nanmean_over_trials(values_utx: np.ndarray) -> np.ndarray:
+    """
+    Mean over the trial axis without warning when every trial/bin is NaN.
+    """
+    values = np.asarray(values_utx, dtype=np.float64)
+    if values.ndim != 3:
+        raise ValueError(f"values must be 3D (cell, trial, bin), got shape {values.shape}")
+
+    valid = np.isfinite(values)
+    n_valid = np.sum(valid, axis=1)
+    summed = np.sum(np.where(valid, values, 0.0), axis=1)
+    return np.divide(
+        summed,
+        n_valid,
+        out=np.full((values.shape[0], values.shape[2]), np.nan, dtype=np.float64),
+        where=n_valid > 0,
+    )
 
 
 def build_ratemap_from_trials(
@@ -263,11 +314,19 @@ def build_ratemap_from_trials(
 
     # MATLAB fct_rmap adds eps to dwell before computing firing rate.
     dwell_tx_x = dwell_tx_x + eps
-    fr_tx_ux = nbspk_tx_ux / dwell_tx_x[None, :, :]
+    fr_tx_ux = _rate_from_counts_and_dwell(
+        nbspk_tx_ux,
+        dwell_tx_x,
+        min_dwell_s=cfg.min_dwell_s,
+    )
 
     nbspk_s_tx_ux = smooth_last_axis(nbspk_tx_ux, cfg.smooth_sigma_bins)
     dwell_s_tx_x = smooth_last_axis(dwell_tx_x, cfg.smooth_sigma_bins) + eps
-    fr_s_tx_ux = nbspk_s_tx_ux / dwell_s_tx_x[None, :, :]
+    fr_s_tx_ux = _rate_from_counts_and_dwell(
+        nbspk_s_tx_ux,
+        dwell_s_tx_x,
+        min_dwell_s=cfg.min_dwell_s,
+    )
 
     if cfg.xbin_rem > 0:
         r = int(cfg.xbin_rem)
@@ -304,8 +363,8 @@ def build_ratemap_from_trials(
         dwell_cx_x[c - 1, :] = np.nanmean(dwell_tx_x[idx, :], axis=0)
         nbspk_s_cx_ux[:, c - 1, :] = np.nanmean(nbspk_s_tx_ux[:, idx, :], axis=1)
         dwell_s_cx_x[c - 1, :] = np.nanmean(dwell_s_tx_x[idx, :], axis=0)
-        fr_cx_ux[:, c - 1, :] = np.nanmean(fr_tx_ux[:, idx, :], axis=1)
-        fr_s_cx_ux[:, c - 1, :] = np.nanmean(fr_s_tx_ux[:, idx, :], axis=1)
+        fr_cx_ux[:, c - 1, :] = _nanmean_over_trials(fr_tx_ux[:, idx, :])
+        fr_s_cx_ux[:, c - 1, :] = _nanmean_over_trials(fr_s_tx_ux[:, idx, :])
 
     centers = 0.5 * (edges[:-1] + edges[1:])
     return RatemapPack(

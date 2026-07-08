@@ -5,6 +5,13 @@ import subprocess
 import sys
 from pathlib import Path
 
+from cellclass.config import (
+    DEFAULT_TYPE_U_COMPARISON_FEATURES,
+    DEFAULT_TYPE_U_COMPARISON_N_INIT,
+    DEFAULT_TYPE_U_COMPARISON_ROOT,
+    csv_join,
+)
+
 
 def repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
@@ -39,7 +46,7 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--processed_root", type=str, default="data/processed")
     ap.add_argument("--schedule", type=str, default="data/schedule.xlsx")
     ap.add_argument("--results_root", type=str, default="results")
-    ap.add_argument("--comparison_out", type=str, default="results/type_u_comparison")
+    ap.add_argument("--comparison_out", type=str, default=DEFAULT_TYPE_U_COMPARISON_ROOT)
 
     ap.add_argument(
         "--no_recursive_raw",
@@ -63,12 +70,12 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--no_qc", action="store_true", help="Write clean units without QC filtering.")
     ap.add_argument("--qc_strict", action="store_true")
     ap.add_argument("--age_groups", type=str, default="")
-    ap.add_argument("--features", type=str, default="")
+    ap.add_argument("--features", type=str, default=csv_join(DEFAULT_TYPE_U_COMPARISON_FEATURES))
     ap.add_argument("--no_log_fr", action="store_true")
     ap.add_argument("--no_standardize", action="store_true")
 
     ap.add_argument("--random_state", type=int, default=0)
-    ap.add_argument("--n_init", type=int, default=10)
+    ap.add_argument("--n_init", type=int, default=DEFAULT_TYPE_U_COMPARISON_N_INIT)
     ap.add_argument(
         "--covariance_type",
         type=str,
@@ -87,7 +94,8 @@ def main() -> None:
 
     mat_to_npz = [
         python,
-        "src/cellclass/mat_to_npz.py",
+        "-m",
+        "cellclass.mat_to_npz",
         "--mode",
         "ratemap",
         "--input",
@@ -129,7 +137,8 @@ def main() -> None:
 
     compare_type_u = [
         python,
-        "src/models/compare_type_u.py",
+        "-m",
+        "models.compare_type_u",
         "--results_root",
         args.results_root,
         "--out_root",

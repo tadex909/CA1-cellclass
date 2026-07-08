@@ -1,207 +1,229 @@
-﻿# CA1-cellclass
+# CA1-cellclass
 
-Pipeline for CA1 neuron feature extraction and cell-type analysis across mouse age groups.
+End-to-end workflow for CA1 neuron feature extraction, unsupervised cell-type
+classification, and downstream place-field/SSI analyses.
 
-This repository has two main layers:
+The current canonical cell-classification output is:
 
-1. `src/cellclass`: data processing and feature extraction from raw/interim files.
-2. `src/models`: unsupervised modeling, model-selection, stability analysis, and comparison with external labels.
-3. `src/placefields`: place-field analysis scaffold (occupancy/rate maps, spatial information, field detection).
+```text
+results/type_u_comparison_valero_feats_3/
+```
+
+Downstream place-field and SSI scripts should use:
+
+```text
+results/type_u_comparison_valero_feats_3/cell_classification_table.csv
+```
+
+Older `results/type_u_comparison*` folders are historical experiment variants.
 
 ---
 
-## Project Structure
+## Repository Layout
 
 - `src/cellclass/`
-  - Core library code for signal processing, ACG/waveform features, and the feature extraction pipeline.
-  - `config.py` is the shared source for feature defaults, age groups, and `type_u` label conventions.
-  - `validation.py` checks file/table contracts at pipeline boundaries.
-- `scripts/`
-  - Organized CLI entry points:
-    - `scripts/pipelines/` (data/feature/placefield pipelines)
-    - `scripts/reports/` (plots/comparison tables)
-    - `scripts/maintenance/` (registry/reorg helpers)
-    - `scripts/legacy/` (older scripts)
-  - See `scripts/README.md` for canonical commands and temporary compatibility wrappers.
+  - Raw/interim conversion, feature extraction, shared configuration, and
+    workflow validation.
 - `src/models/`
-  - Modeling scripts:
-    - `fitting.py`: systematic GMM model selection (`k`, feature subsets).
-    - `compare_type_u.py`: fixed `k=2` clustering vs `allcel__type_u`.
-    - `stability_analysis.py`: per-age-group robustness analysis across seeds/subsets.
+  - GMM model selection, fixed `k=2` comparison to `allcel__type_u`,
+    disagreement review, and stability analysis.
 - `src/placefields/`
-  - Place-field analysis utilities and session-level scaffold pipeline.
+  - Ratemaps, place-field/null analyses, SSI helpers, Bayesian decoding, and
+    population geometry utilities.
+- `scripts/`
+  - CLI entry points organized by intent:
+    - `scripts/pipelines/`: data-producing workflows.
+    - `scripts/reports/`: plots and comparison reports.
+    - `scripts/maintenance/`: registries, checks, and non-destructive result views.
 - `data/`
-  - Raw/interim/processed data.
+  - Local raw/interim/processed data artifacts.
 - `results/`
-  - Aggregated age-group datasets, modeling outputs, and run-scoped analysis artifacts.
-  - Use `scripts/maintenance/build_results_registry.py` to index runs and outputs.
+  - Local generated analysis outputs. See `results/README.md`.
+
+Compatibility wrappers at the top of `scripts/` were removed. Use the canonical
+paths under `scripts/pipelines/`, `scripts/reports/`, and `scripts/maintenance/`.
 
 ---
 
-## Dev Setup
+## Setup
 
-Start from an activated virtual environment or Conda environment.
-If `python` is not on your `PATH`, replace it below with your environment's interpreter path.
-
-1. Install the repo in editable mode
+Run commands from the repository root.
 
 ```powershell
 python -m pip install -e .
 ```
 
-2. Run the synthetic smoke tests
+For development tools:
 
 ```powershell
-python -m unittest discover -s tests -p "test_*.py"
+python -m pip install -e .[dev]
 ```
 
-3. Run the canonical scripts from repository root
+If you have not installed the package, run commands with `PYTHONPATH=src`.
+
+Run the test suite:
 
 ```powershell
-python scripts/pipelines/interim_to_processed.py --interim_root data/interim --processed_root data/processed --skip_existing
+python -m pytest tests
 ```
 
-Notes:
-
-- The editable install is the supported dev setup for `cellclass` and `placefields`.
-- `python -m pip install -e .[dev]` is optional if you also want the extra dev tooling.
-- Generated outputs under `data/`, `results/`, and `path/` are treated as local artifacts by default.
-
 ---
 
-## What `cellclass` Does
+## Main Cell-Class Workflow
 
-`cellclass` turns session-level spike/waveform data into processed per-neuron features.
-
-Typical outputs include:
-
-- firing/statistical features (`fr_hz`, `cv2`, `burst_index`)
-- waveform features (`spk_duration_ms`, `spk_peaktrough_ms`, `spk_asymmetry`)
-- ACG-based features (`refractory_*`, `acg_peak_latency_ms`)
-- QC flags (`qc_*`)
-- external prior label when present (`allcel__type_u`)
-
-Main orchestration scripts:
-
-1. `src/cellclass/pipeline.py`
-   - Package-level feature extraction for one `*_allcel.npz` session.
-
-2. `scripts/pipelines/interim_to_processed.py`
-   - Runs extraction on all interim `.npz` sessions.
-   - Writes per-session files under `data/processed/<mouse>/...`.
-
-3. `scripts/pipelines/aggregate_by_age.py`
-   - Merges sessions with age metadata (`data/schedule.xlsx`).
-   - Writes age-group datasets in `results/<AGE>/`.
-
----
-
-## What `models` Does
-
-`src/models` runs downstream unsupervised analyses on age-group datasets.
-
-### 1) Model Selection (`fitting.py`)
-
-- Tests multiple feature subsets and cluster counts.
-- Computes metrics (`BIC`, `AIC`, `silhouette`, `Calinski-Harabasz`, `Davies-Bouldin`).
-- Filters tiny clusters with `--min_cluster_size`.
-- Selects best model using ordered rule:
-  - lowest `BIC`
-  - highest `silhouette`
-  - lowest `Davies-Bouldin`
-  - lowest `AIC`
-  - highest `Calinski-Harabasz`
-
-### 2) Label Comparison (`compare_type_u.py`)
-
-- Runs fixed `k=2` GMM with all features.
-- Maps clusters to `interneuron/pyramidal` via `spk_duration_ms`.
-- Compares predictions with `allcel__type_u` (`0=interneuron`, `1=pyramidal`).
-- Exports discrepancy summaries by neuron/session/age.
-
-### 3) Stability (`stability_analysis.py`)
-
-- Runs repeated `k=2` clustering for one age group over seeds/subsets.
-- Quantifies run-to-run stability (pairwise ARI).
-- Quantifies agreement with `type_u` (including flip-aware accuracy).
-- Produces uncertainty ranking for neurons.
-
----
-
-## Typical Workflow
-
-From repository root:
-
-Run the full `type_u` comparison workflow in one command:
+The one-command workflow from raw MAT files to the canonical comparison output is:
 
 ```powershell
 python scripts/pipelines/build_type_u_comparison_from_raw.py --dry-run
 python scripts/pipelines/build_type_u_comparison_from_raw.py
 ```
 
-This expands to the manual stages below.
+The default comparison uses the current Valero feature set:
 
-1. Process interim sessions
-
-```powershell
-python scripts/pipelines/interim_to_processed.py --interim_root data/interim --processed_root data/processed --pattern "*_allcel.npz" --skip_existing
+```text
+cv2, acg_peak_latency_ms, spk_duration_ms, spk_asymmetry, log_fr_hz_session
 ```
 
-2. Aggregate by age group
+It writes to:
 
-```powershell
-python scripts/pipelines/aggregate_by_age.py --processed_root data/processed --excel data/schedule.xlsx --outdir results --qc
+```text
+results/type_u_comparison_valero_feats_3/
 ```
 
-3. Run GMM model selection
+The same workflow can be run manually:
 
 ```powershell
-python src/models/fitting.py --results_root results --out_root results/model_selection --subset_mode leave_one_out --k_min 2 --k_max 6 --n_init 5 --min_cluster_size 3 --min_units 30
-```
+python -m cellclass.mat_to_npz --mode ratemap --input data/raw --output data/interim --recursive
 
-4. Compare fixed `k=2` model to `type_u`
+python scripts/pipelines/interim_to_processed.py `
+  --interim_root data/interim `
+  --processed_root data/processed `
+  --pattern "*_allcel.npz" `
+  --skip_existing
 
-```powershell
-python src/models/compare_type_u.py --results_root results --out_root results/type_u_comparison --n_init 10
-```
+python scripts/pipelines/aggregate_by_age.py `
+  --processed_root data/processed `
+  --excel data/schedule.xlsx `
+  --outdir results `
+  --qc
 
-5. Run per-group stability analysis (example: `P23_24`)
-
-```powershell
-python src/models/stability_analysis.py --results_root results --out_root results/stability --age_group P23_24 --subset_mode leave_one_out --seeds 0,1,2,3,4,5,6,7,8,9 --n_init 10
-```
-
-6. Build a results registry/index (recommended)
-
-```powershell
-python scripts/maintenance/build_results_registry.py --results_root results --out_root results/tables/results_registry
-```
-
-7. Create an organized non-destructive results view (optional)
-
-```powershell
-python scripts/maintenance/create_results_view.py --results_root results --view_root results/_organized
-python scripts/maintenance/create_results_view.py --results_root results --view_root results/_organized --mode hardlink --execute
+python -m models.compare_type_u `
+  --results_root results `
+  --out_root results/type_u_comparison_valero_feats_3
 ```
 
 ---
 
-## Key Outputs
+## Optional Model Analyses
 
-- `results/<AGE>/...`
-  - age-group clean/all units used for modeling.
-- `results/model_selection/<AGE>/...`
-  - full + ranked model selection tables and best model labels.
-- `results/type_u_comparison/...`
-  - agreement/discrepancy summaries vs `allcel__type_u`.
-- `results/stability/<AGE>/...`
-  - run-level stability metrics, pairwise ARI, uncertain neurons.
+Model selection:
+
+```powershell
+python -m models.fitting `
+  --results_root results `
+  --out_root results/model_selection `
+  --subset_mode leave_one_out `
+  --k_min 2 `
+  --k_max 6 `
+  --n_init 5 `
+  --min_cluster_size 3 `
+  --min_units 30
+```
+
+Stability analysis:
+
+```powershell
+python -m models.stability_analysis `
+  --results_root results `
+  --out_root results/stability `
+  --age_group P19-21 `
+  --subset_mode leave_one_out `
+  --seeds 0,1,2,3,4,5,6,7,8,9 `
+  --n_init 10
+```
+
+Disagreement review/export:
+
+```powershell
+python -m models.export_disagreement_excel
+python -m models.disagreement_review --top_n 500
+```
 
 ---
 
-## Notes
+## Place-Field And SSI Workflows
 
-- Cluster IDs are arbitrary; when comparing binary labels, use label-invariant metrics (e.g., ARI) or flip-aware accuracy.
-- Low silhouette values indicate overlapping classes in current feature space, not necessarily a bug.
-- For details on modeling options, see `src/models/README.md`.
+Build ratemaps from interim files:
 
+```powershell
+python scripts/pipelines/build_ratemap_from_interim.py `
+  --interim_root data/interim `
+  --out_root results/ratemap
+```
+
+Build null place-field/SSI outputs:
+
+```powershell
+python scripts/pipelines/build_placefield_null_from_interim.py `
+  --interim_root data/interim `
+  --out_root results/placefield_null
+```
+
+The null/SSI pipeline defaults to the canonical classification table:
+
+```text
+results/type_u_comparison_valero_feats_3/cell_classification_table.csv
+```
+
+In that table, `pred_type` is the current GMM classification and `u_type` is
+the legacy `allcel__type_u` label normalized to `pyramidal`/`interneuron`.
+
+Other available pipelines include:
+
+- `scripts/pipelines/build_bayesian_decoder_from_interim.py`
+- `scripts/pipelines/build_population_geometry_from_ratemap.py`
+
+---
+
+## Results Maintenance
+
+Refresh the results registry:
+
+```powershell
+python scripts/maintenance/build_results_registry.py `
+  --results_root results `
+  --out_root results/tables/results_registry
+```
+
+Create or refresh a non-destructive organized view:
+
+```powershell
+python scripts/maintenance/create_results_view.py `
+  --results_root results `
+  --view_root results/_organized
+```
+
+Materialize that view only when needed:
+
+```powershell
+python scripts/maintenance/create_results_view.py `
+  --results_root results `
+  --view_root results/_organized `
+  --mode hardlink `
+  --execute
+```
+
+`results/_organized/` is derived and can be deleted/recreated. It is not a
+canonical output.
+
+---
+
+## Conventions
+
+- Shared feature lists, age groups, label conventions, and canonical result
+  paths live in `src/cellclass/config.py`.
+- Boundary validators live in `src/cellclass/validation.py`.
+- Run model modules with `python -m models.<module>` after editable install.
+- Do not add new top-level script wrappers.
+- Generated outputs under `data/`, `results/`, and `path/` are local artifacts
+  by default.

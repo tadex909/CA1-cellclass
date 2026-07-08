@@ -6,7 +6,15 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from cellclass.config import DEFAULT_AGE_GROUPS, age_group_from_age, normalize_type_u
+from cellclass.config import (
+    DEFAULT_AGE_GROUPS,
+    DEFAULT_CELL_CLASSIFICATION_TABLE,
+    DEFAULT_TYPE_U_COMPARISON_FEATURES,
+    DEFAULT_TYPE_U_COMPARISON_N_INIT,
+    DEFAULT_TYPE_U_COMPARISON_ROOT,
+    age_group_from_age,
+    normalize_type_u,
+)
 from cellclass.features import compute_cv2, waveform_features_from_bestswaveforms
 from cellclass.pipeline import parse_session_id
 from cellclass.processing import compute_acg
@@ -22,6 +30,23 @@ class CellclassSmokeTest(unittest.TestCase):
         labels = normalize_type_u(pd.Series(["interneuron", "pyr", 1, "bad"]))
         self.assertEqual(labels.iloc[:3].tolist(), [0, 1, 1])
         self.assertTrue(pd.isna(labels.iloc[3]))
+
+        self.assertEqual(DEFAULT_TYPE_U_COMPARISON_ROOT, "results/type_u_comparison_valero_feats_3")
+        self.assertEqual(
+            DEFAULT_CELL_CLASSIFICATION_TABLE,
+            "results/type_u_comparison_valero_feats_3/cell_classification_table.csv",
+        )
+        self.assertEqual(
+            DEFAULT_TYPE_U_COMPARISON_FEATURES,
+            (
+                "cv2",
+                "acg_peak_latency_ms",
+                "spk_duration_ms",
+                "spk_asymmetry",
+                "log_fr_hz_session",
+            ),
+        )
+        self.assertEqual(DEFAULT_TYPE_U_COMPARISON_N_INIT, 15)
 
     def test_pipeline_parse_session_id(self) -> None:
         meta = parse_session_id(Path("VS57_2022-12-18_18-51-04_allcel.npz"))

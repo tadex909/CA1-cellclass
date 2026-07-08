@@ -19,10 +19,13 @@ from placefields import (
     build_population_geometry_for_group,
     build_population_geometry_from_saved_ratemap,
     cue_zone_layout_for_condition,
+    cue_zone_layout_for_condition_on_track,
     compute_normalization_scales,
     compute_zone_displacement_profiles,
     decode_condway,
     filter_cell_ids_by_pred_type,
+    label_positions_by_zone,
+    label_positions_by_zone_component,
     label_xbin_centers_by_zone,
     label_xbin_centers_by_zone_component,
     load_cell_classification_table,
@@ -84,7 +87,13 @@ def _save_synthetic_classification_csv(csv_path: Path) -> None:
     csv_path.parent.mkdir(parents=True, exist_ok=True)
     pd.DataFrame(
         [
-            {"session_id": "S1", "cell_id": 10, "pred_type": "pyramidal", "age_group": "P16-18"},
+            {
+                "session_id": "S1",
+                "cell_id": 10,
+                "pred_type": "pyramidal",
+                "age_group": "P16-18",
+                "allcel__type_u": 1,
+            },
             {
                 "session_id": "S1",
                 "cell_id": 11,
@@ -92,6 +101,7 @@ def _save_synthetic_classification_csv(csv_path: Path) -> None:
                 "age_group": "P16-18",
                 "gmm_p_interneuron": 0.91,
                 "gmm_p_pyramidal": 0.09,
+                "allcel__type_u": 0,
             },
             {
                 "session_id": "S2",
@@ -100,6 +110,7 @@ def _save_synthetic_classification_csv(csv_path: Path) -> None:
                 "age_group": "P19-21",
                 "gmm_p_interneuron": 0.47,
                 "gmm_p_pyramidal": 0.53,
+                "allcel__type_u": 1,
             },
         ]
     ).to_csv(csv_path, index=False)
@@ -131,22 +142,22 @@ class PopulationGeometryTest(unittest.TestCase):
     def test_cue_zone_layout_records_po_and_pom_definitions(self) -> None:
         po_layout = cue_zone_layout_for_condition("PO2")
         self.assertEqual(po_layout.condition_family, "PO")
-        self.assertEqual(po_layout.rich_spans, ((13.0, 43.0), (81.0, 96.0)))
-        self.assertEqual(po_layout.excluded_spans, ((0.0, 10.0),))
+        self.assertEqual(po_layout.rich_spans, ((0.0, 43.0), (81.0, 100.0)))
+        self.assertEqual(po_layout.excluded_spans, tuple())
         self.assertEqual(po_layout.object_centers, (20.0, 36.0, 88.0))
         self.assertEqual(
             po_layout.poor_spans,
-            ((10.0, 13.0), (43.0, 81.0), (96.0, 100.0)),
+            ((43.0, 81.0),),
         )
 
         pom_layout = cue_zone_layout_for_condition("POM")
         self.assertEqual(pom_layout.condition_family, "POM")
-        self.assertEqual(pom_layout.rich_spans, ((13.0, 28.0), (57.0, 96.0)))
-        self.assertEqual(pom_layout.excluded_spans, ((0.0, 10.0),))
+        self.assertEqual(pom_layout.rich_spans, ((0.0, 28.0), (57.0, 100.0)))
+        self.assertEqual(pom_layout.excluded_spans, tuple())
         self.assertEqual(pom_layout.object_centers, (20.0, 64.0, 88.0))
         self.assertEqual(
             pom_layout.poor_spans,
-            ((10.0, 13.0), (28.0, 57.0), (96.0, 100.0)),
+            ((28.0, 57.0),),
         )
 
         self.assertEqual(complement_spans(tuple()), ((0.0, 100.0),))
@@ -156,34 +167,53 @@ class PopulationGeometryTest(unittest.TestCase):
         labels = label_xbin_centers_by_zone(centers, condition_name="PO3")
         np.testing.assert_array_equal(
             labels,
-            np.array(["", "rich", "poor", "rich"], dtype=np.str_),
+            np.array(["rich", "rich", "poor", "rich"], dtype=np.str_),
         )
 
     def test_label_xbin_centers_by_zone_component_splits_contiguous_spans(self) -> None:
         layout = cue_zone_layout_for_condition("PO2")
         self.assertEqual(
             zone_component_names_for_layout(layout),
-            ("rich_1", "rich_2", "poor_1", "poor_2", "poor_3"),
+            ("rich_1", "rich_2", "poor_1"),
         )
 
         centers = np.array([5.0, 12.0, 20.0, 50.0, 90.0, 97.0], dtype=np.float64)
         labels = label_xbin_centers_by_zone_component(centers, layout=layout)
         np.testing.assert_array_equal(
             labels,
-            np.array(["", "poor_1", "rich_1", "poor_2", "rich_2", "poor_3"], dtype=np.str_),
+            np.array(["rich_1", "rich_1", "rich_1", "poor_1", "rich_2", "rich_2"], dtype=np.str_),
         )
 
-    def test_pno_layout_excludes_first_track_segment_from_zone_labels(self) -> None:
+    def test_pno_layout_labels_the_whole_track_as_poor(self) -> None:
         layout = cue_zone_layout_for_condition("PNO")
-        self.assertEqual(layout.excluded_spans, ((0.0, 10.0),))
-        self.assertEqual(layout.poor_spans, ((10.0, 100.0),))
+        self.assertEqual(layout.excluded_spans, tuple())
+        self.assertEqual(layout.poor_spans, ((0.0, 100.0),))
         labels = label_xbin_centers_by_zone(
             np.array([5.0, 12.0, 50.0], dtype=np.float64),
             layout=layout,
         )
         np.testing.assert_array_equal(
             labels,
-            np.array(["", "poor", "poor"], dtype=np.str_),
+            np.array(["poor", "poor", "poor"], dtype=np.str_),
+        )
+
+    def test_cue_zone_layout_scales_to_decoder_xbin_edges(self) -> None:
+        layout = cue_zone_layout_for_condition_on_track(
+            "PO",
+            xbin_edges=np.array([0.0, 70.0, 140.0], dtype=np.float64),
+        )
+        np.testing.assert_allclose(layout.rich_spans, ((0.0, 60.2), (113.4, 140.0)))
+        np.testing.assert_allclose(layout.poor_spans, ((60.2, 113.4),))
+        np.testing.assert_allclose(layout.object_centers, (28.0, 50.4, 123.2))
+
+        positions = np.array([20.0, 80.0, 130.0], dtype=np.float64)
+        np.testing.assert_array_equal(
+            label_positions_by_zone(positions, layout=layout),
+            np.array(["rich", "poor", "rich"], dtype=np.str_),
+        )
+        np.testing.assert_array_equal(
+            label_positions_by_zone_component(positions, layout=layout),
+            np.array(["rich_1", "poor_1", "rich_2"], dtype=np.str_),
         )
 
     def test_compute_displacement_profile_uses_positive_lags_only(self) -> None:
@@ -520,12 +550,17 @@ class PopulationGeometryTest(unittest.TestCase):
                     "session_id",
                     "cell_id",
                     "pred_type",
+                    "u_type",
                     "p_pred_type",
                     "Sure (P(pred_type) > 0.6)",
                     "age_group",
                 ],
             )
             self.assertEqual(len(table), 3)
+            self.assertEqual(
+                table.loc[table["cell_id"] == 11, "u_type"].iloc[0],
+                "interneuron",
+            )
             self.assertAlmostEqual(
                 float(table.loc[table["cell_id"] == 11, "p_pred_type"].iloc[0]),
                 0.91,
@@ -544,6 +579,68 @@ class PopulationGeometryTest(unittest.TestCase):
                 pred_types=("pyramidal",),
             )
             np.testing.assert_array_equal(selected, np.array([10], dtype=np.int64))
+
+    def test_load_classification_table_from_type_u_comparison_root(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            root = tmp / "type_u_comparison"
+            root.mkdir(parents=True)
+            pd.DataFrame(
+                [
+                    {
+                        "age_group": "P16-18",
+                        "session_id": "S1",
+                        "cell_id": 10,
+                        "pred_type": "pyramidal",
+                        "allcel__type_u": 1,
+                        "gmm_p_interneuron": 0.12,
+                        "gmm_p_pyramidal": 0.88,
+                    },
+                    {
+                        "age_group": "P16-18",
+                        "session_id": "S1",
+                        "cell_id": 11,
+                        "pred_type": "interneuron",
+                        "type_u_type": "interneuron",
+                        "gmm_p_interneuron": 0.57,
+                        "gmm_p_pyramidal": 0.43,
+                    },
+                ]
+            ).to_parquet(root / "all_age_groups_gmm2_vs_type_u.parquet", index=False)
+
+            table = load_cell_classification_table(root)
+
+            self.assertEqual(len(table), 2)
+            self.assertEqual(
+                table.columns.tolist(),
+                [
+                    "session_id",
+                    "cell_id",
+                    "pred_type",
+                    "u_type",
+                    "p_pred_type",
+                    "Sure (P(pred_type) > 0.6)",
+                    "age_group",
+                ],
+            )
+            self.assertEqual(
+                table.loc[table["cell_id"] == 10, "u_type"].iloc[0],
+                "pyramidal",
+            )
+            self.assertAlmostEqual(
+                float(table.loc[table["cell_id"] == 10, "p_pred_type"].iloc[0]),
+                0.88,
+            )
+            self.assertAlmostEqual(
+                float(table.loc[table["cell_id"] == 11, "p_pred_type"].iloc[0]),
+                0.57,
+            )
+            self.assertTrue(
+                bool(table.loc[table["cell_id"] == 10, "Sure (P(pred_type) > 0.6)"].iloc[0])
+            )
+            self.assertFalse(
+                bool(table.loc[table["cell_id"] == 11, "Sure (P(pred_type) > 0.6)"].iloc[0])
+            )
 
     def test_saved_ratemap_builder_can_subset_selected_cells(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

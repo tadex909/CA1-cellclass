@@ -11,9 +11,9 @@ import pandas as pd
 from sklearn.metrics import adjusted_rand_score, silhouette_score
 from sklearn.mixture import GaussianMixture
 
-from fitting import DEFAULT_AGE_GROUPS, prepare_matrix
-from cellclass.config import FEATURE_SET_EXPERIMENTS, csv_join, parse_csv_list  # noqa: E402
-from cellclass.validation import validate_age_group_table  # noqa: E402
+from cellclass.config import FEATURE_SET_EXPERIMENTS, csv_join, parse_csv_list
+from cellclass.validation import validate_age_group_table
+from .fitting import DEFAULT_AGE_GROUPS, prepare_matrix
 
 
 FEATURE_SETS: dict[str, list[str]] = {

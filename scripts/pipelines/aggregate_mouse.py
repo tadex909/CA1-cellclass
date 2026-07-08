@@ -3,23 +3,12 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-import sys
 
 import numpy as np
 import pandas as pd
 
-
-THIS_DIR = Path(__file__).resolve().parent
-root = THIS_DIR
-while root != root.parent and not (root / "src" / "cellclass").is_dir():
-    root = root.parent
-src_dir = root / "src"
-if not (src_dir / "cellclass").is_dir():
-    raise RuntimeError(f"Could not find src/cellclass starting from {THIS_DIR}")
-sys.path.insert(0, str(src_dir))
-
-from cellclass.config import DEFAULT_MOUSE_AGGREGATION_FEATURES, csv_join  # noqa: E402
-from cellclass.validation import validate_feature_table  # noqa: E402
+from cellclass.config import DEFAULT_MOUSE_AGGREGATION_FEATURES, csv_join
+from cellclass.validation import validate_feature_table
 
 
 DEFAULT_FEATURES = list(DEFAULT_MOUSE_AGGREGATION_FEATURES)

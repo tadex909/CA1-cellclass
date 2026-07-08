@@ -13,6 +13,8 @@ import pandas as pd
 
 AGE_GROUP_RE = re.compile(r"^P\d+(?:[-_]\d+)?$")
 MOUSE_RE = re.compile(r"^(?:VS|V)\d+$")
+TABLE_SUFFIXES = {".csv", ".tsv", ".xlsx", ".parquet", ".json"}
+CURRENT_TYPE_U_COMPARISON_NAME = "type_u_comparison_valero_feats_3"
 
 
 def parse_csv_list(raw: str | None) -> list[str]:
@@ -22,19 +24,39 @@ def parse_csv_list(raw: str | None) -> list[str]:
 
 
 def classify_top_level(name: str) -> tuple[str, str]:
-    if name in {"ratemap", "figures"} or name.startswith("placefield_"):
-        return "placefields", name
+    if name in {"ratemap", "placefield_null", "position_decoding", "population_geometry"}:
+        return f"placefields/{name}", name
+    if name.startswith("placefield_"):
+        return f"placefields/{name}", name
+    if name in {"figures"}:
+        return "reports/figures", name
     if name in {"tables"}:
-        return "reports", name
-    if name in {"model_selection", "stability", "feature_set_experiments"} or name.startswith(
-        "type_u_comparison"
-    ):
-        return "models", name
+        return "reports/tables", name
+    if name.startswith("model_selection"):
+        return "models/model_selection", name
+    if name.startswith("stability"):
+        return "models/stability", name
+    if name.startswith("feature_set_experiments"):
+        return "models/feature_set_experiments", name
+    if name.startswith("type_u_comparison"):
+        bucket = "current" if name == CURRENT_TYPE_U_COMPARISON_NAME else "archive"
+        return f"models/type_u_comparison/{bucket}", name
     if AGE_GROUP_RE.match(name):
         return "datasets/age_groups", name
     if MOUSE_RE.match(name):
         return "datasets/mice", name
-    return "misc", name
+    return "misc/other", name
+
+
+def classify_top_level_file(name: str) -> tuple[str, str] | None:
+    lower = name.lower()
+    if lower == "readme.md":
+        return None
+    if lower.startswith("tmp_"):
+        return "misc/top_level_files", name
+    if Path(name).suffix.lower() in TABLE_SUFFIXES:
+        return "reports/tables", name
+    return "misc/top_level_files", name
 
 
 def dir_stats(path: Path) -> tuple[int, int]:
@@ -48,6 +70,34 @@ def dir_stats(path: Path) -> tuple[int, int]:
             except OSError:
                 continue
     return n_files, n_bytes
+
+
+def file_stats(path: Path) -> tuple[int, int]:
+    try:
+        return 1, path.stat().st_size
+    except OSError:
+        return 1, 0
+
+
+def remove_existing(path: Path) -> None:
+    if path.is_dir() and not path.is_symlink():
+        shutil.rmtree(path)
+    else:
+        path.unlink()
+
+
+def materialize_file_with_mode(src: Path, dst: Path, mode: str) -> str:
+    if mode not in {"hardlink", "copy"}:
+        raise ValueError(f"Unsupported mode: {mode}")
+    if mode == "hardlink":
+        try:
+            os.link(src, dst)
+            return "hardlinked"
+        except OSError:
+            shutil.copy2(src, dst)
+            return "copied"
+    shutil.copy2(src, dst)
+    return "copied"
 
 
 def copytree_with_mode(src: Path, dst: Path, mode: str) -> str:
@@ -115,19 +165,33 @@ def main() -> None:
     plan_rows: list[dict[str, Any]] = []
     children = sorted(results_root.iterdir(), key=lambda p: p.name.lower())
     for src in children:
-        if not src.is_dir():
-            continue
         if src.name.startswith("."):
             continue
         if src.name in skip_names:
             continue
-        # Avoid recursive self-inclusion if view_root is under results_root.
-        if src.resolve() == view_root.resolve():
+
+        is_dir = src.is_dir()
+        is_file = src.is_file()
+        if not (is_dir or is_file):
             continue
 
-        category_root, leaf_name = classify_top_level(src.name)
+        # Avoid recursive self-inclusion if view_root is under results_root.
+        if is_dir and src.resolve() == view_root.resolve():
+            continue
+
+        if is_dir:
+            category_root, leaf_name = classify_top_level(src.name)
+            n_files, n_bytes = dir_stats(src)
+            entry_type = "directory"
+        else:
+            classified = classify_top_level_file(src.name)
+            if classified is None:
+                continue
+            category_root, leaf_name = classified
+            n_files, n_bytes = file_stats(src)
+            entry_type = "file"
+
         dst = view_root / category_root / leaf_name
-        n_files, n_bytes = dir_stats(src)
 
         action = "planned"
         status = "ok"
@@ -138,13 +202,22 @@ def main() -> None:
                     action = "skip_exists"
                     status = "skipped"
                 else:
-                    shutil.rmtree(dst)
-                    action = copytree_with_mode(src, dst, args.mode)
+                    remove_existing(dst)
+                    action = (
+                        copytree_with_mode(src, dst, args.mode)
+                        if is_dir
+                        else materialize_file_with_mode(src, dst, args.mode)
+                    )
             else:
-                action = copytree_with_mode(src, dst, args.mode)
+                action = (
+                    copytree_with_mode(src, dst, args.mode)
+                    if is_dir
+                    else materialize_file_with_mode(src, dst, args.mode)
+                )
 
         plan_rows.append(
             {
+                "entry_type": entry_type,
                 "source_dir": str(src),
                 "dest_dir": str(dst),
                 "category": category_root,
@@ -188,4 +261,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

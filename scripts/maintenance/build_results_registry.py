@@ -11,6 +11,8 @@ import pandas as pd
 
 AGE_GROUP_RE = re.compile(r"^P\d+(?:[-_]\d+)?$")
 MOUSE_RE = re.compile(r"^(?:VS|V)\d+$")
+TABLE_SUFFIXES = {".csv", ".tsv", ".xlsx", ".parquet", ".json"}
+CURRENT_TYPE_U_COMPARISON_NAME = "type_u_comparison_valero_feats_3"
 
 
 def parse_csv_list(raw: str | None) -> list[str]:
@@ -33,19 +35,40 @@ def dir_stats(path: Path) -> tuple[int, int]:
 
 
 def classify_top_level(name: str) -> tuple[str, str]:
-    if name in {"ratemap", "figures"} or name.startswith("placefield_"):
-        return "placefields", "session_outputs"
+    if name in {"ratemap", "placefield_null", "position_decoding", "population_geometry"}:
+        return "placefields", name
+    if name.startswith("placefield_"):
+        return "placefields", name
+    if name in {"figures"}:
+        return "reports", "figures"
     if name in {"tables"}:
         return "reports", "tables"
-    if name in {"model_selection", "stability", "feature_set_experiments"} or name.startswith(
-        "type_u_comparison"
-    ):
-        return "models", "analysis_outputs"
+    if name.startswith("model_selection"):
+        return "models", "model_selection"
+    if name.startswith("stability"):
+        return "models", "stability"
+    if name.startswith("feature_set_experiments"):
+        return "models", "feature_set_experiments"
+    if name.startswith("type_u_comparison"):
+        if name == CURRENT_TYPE_U_COMPARISON_NAME:
+            return "models", "type_u_comparison_current"
+        return "models", "type_u_comparison_archive"
     if AGE_GROUP_RE.match(name):
         return "datasets", "age_group"
     if MOUSE_RE.match(name):
         return "datasets", "mouse"
     return "misc", "other"
+
+
+def classify_top_level_file(name: str) -> tuple[str, str] | None:
+    lower = name.lower()
+    if lower == "readme.md":
+        return None
+    if lower.startswith("tmp_"):
+        return "misc", "top_level_file"
+    if Path(name).suffix.lower() in TABLE_SUFFIXES:
+        return "reports", "table_file"
+    return "misc", "top_level_file"
 
 
 def safe_read_json(path: Path) -> dict[str, Any]:
@@ -73,6 +96,36 @@ def collect_top_level_inventory(results_root: Path, skip_names: set[str]) -> pd.
                 "category": category,
                 "subcategory": subcategory,
                 "n_files": int(n_files),
+                "size_mb": float(n_bytes / 1e6),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def collect_top_level_files(results_root: Path, skip_names: set[str]) -> pd.DataFrame:
+    rows: list[dict[str, Any]] = []
+    for child in sorted(results_root.iterdir(), key=lambda p: p.name.lower()):
+        if not child.is_file():
+            continue
+        if child.name.startswith("."):
+            continue
+        if child.name in skip_names:
+            continue
+        classified = classify_top_level_file(child.name)
+        if classified is None:
+            continue
+        category, subcategory = classified
+        try:
+            n_bytes = child.stat().st_size
+        except OSError:
+            n_bytes = 0
+        rows.append(
+            {
+                "name": child.name,
+                "path": str(child),
+                "category": category,
+                "subcategory": subcategory,
+                "suffix": child.suffix.lower(),
                 "size_mb": float(n_bytes / 1e6),
             }
         )
@@ -202,23 +255,31 @@ def main() -> None:
     skip_names = set(parse_csv_list(args.skip_dirs))
 
     top = collect_top_level_inventory(results_root, skip_names)
+    top_files = collect_top_level_files(results_root, skip_names)
     runs = collect_run_registry(results_root, skip_names)
     latest = collect_latest_pointers(results_root, skip_names)
 
     if not top.empty:
         top = top.sort_values(["category", "subcategory", "name"], kind="stable").reset_index(drop=True)
+    if not top_files.empty:
+        top_files = top_files.sort_values(["category", "subcategory", "name"], kind="stable").reset_index(drop=True)
     if not runs.empty:
         runs = runs.sort_values(["script", "created_at_utc", "run_dir"], kind="stable").reset_index(drop=True)
     if not latest.empty:
         latest = latest.sort_values(["base_dir"], kind="stable").reset_index(drop=True)
 
     top.to_csv(out_root / "top_level_inventory.csv", index=False)
+    top_files.to_csv(out_root / "top_level_files.csv", index=False)
     runs.to_csv(out_root / "run_registry.csv", index=False)
     latest.to_csv(out_root / "latest_pointers.csv", index=False)
 
     write_json(
         out_root / "top_level_inventory.json",
         [] if top.empty else top.to_dict(orient="records"),
+    )
+    write_json(
+        out_root / "top_level_files.json",
+        [] if top_files.empty else top_files.to_dict(orient="records"),
     )
     write_json(
         out_root / "run_registry.json",
@@ -233,10 +294,16 @@ def main() -> None:
         "results_root": str(results_root),
         "out_root": str(out_root),
         "n_top_level_dirs": int(len(top)),
+        "n_top_level_files": int(len(top_files)),
         "n_run_configs": int(len(runs)),
         "n_latest_pointers": int(len(latest)),
         "top_level_category_counts": (
             {} if top.empty else {str(k): int(v) for k, v in top["category"].value_counts().to_dict().items()}
+        ),
+        "top_level_file_category_counts": (
+            {}
+            if top_files.empty
+            else {str(k): int(v) for k, v in top_files["category"].value_counts().to_dict().items()}
         ),
         "scripts_with_runs": (
             {} if runs.empty else {str(k): int(v) for k, v in runs["script"].value_counts().to_dict().items()}
@@ -246,6 +313,7 @@ def main() -> None:
 
     print(f"Wrote registry to: {out_root}")
     print(f"Top-level directories indexed: {summary['n_top_level_dirs']}")
+    print(f"Top-level files indexed: {summary['n_top_level_files']}")
     print(f"Runs indexed (run_config.json): {summary['n_run_configs']}")
 
 

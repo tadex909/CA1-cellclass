@@ -12,16 +12,6 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-# Allow running from repository root without editable install.
-THIS_DIR = Path(__file__).resolve().parent
-root = THIS_DIR
-while root != root.parent and not (root / "src" / "placefields").is_dir():
-    root = root.parent
-src_dir = root / "src"
-if not (src_dir / "placefields").is_dir():
-    raise RuntimeError(f"Could not find src/placefields starting from {THIS_DIR}")
-sys.path.insert(0, str(src_dir))
-
 from placefields import (
     RatemapConfig,
     build_default_xbin,
@@ -57,7 +47,8 @@ def default_run_id(args: argparse.Namespace) -> str:
     xrem_tag = format_param_token("xrem", int(args.xbin_rem))
     speed_val = "none" if not np.isfinite(args.min_speed) else f"{float(args.min_speed):g}"
     speed_tag = format_param_token("minspeed", speed_val)
-    return f"ratemap__{smooth_tag}__{xrem_tag}__{speed_tag}__{ts}"
+    dwell_tag = format_param_token("mindwell", f"{float(args.min_dwell_s):g}")
+    return f"ratemap__{smooth_tag}__{xrem_tag}__{speed_tag}__{dwell_tag}__{ts}"
 
 
 def get_git_head(repo_root: Path) -> str | None:
@@ -72,6 +63,17 @@ def get_git_head(repo_root: Path) -> str | None:
         return proc.stdout.strip() or None
     except Exception:
         return None
+
+
+def find_repo_root(start: Path) -> Path:
+    root = start.resolve()
+    if root.is_file():
+        root = root.parent
+    while root != root.parent:
+        if (root / "pyproject.toml").exists() or (root / ".git").exists():
+            return root
+        root = root.parent
+    return start.resolve().parent
 
 
 def write_run_config(path: Path, cfg: dict[str, Any]) -> None:
@@ -95,6 +97,15 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--smooth_sigma_bins", type=float, default=2.8)
     ap.add_argument("--xbin_rem", type=int, default=10)
     ap.add_argument("--min_speed", type=float, default=2.0)
+    ap.add_argument(
+        "--min_dwell_s",
+        type=float,
+        default=0.05,
+        help=(
+            "Minimum dwell time, in seconds, required before computing a trial/bin "
+            "firing rate. Lower-occupancy bins are stored as NaN in rate tensors."
+        ),
+    )
     ap.add_argument("--no_normalize_x", action="store_true")
     ap.add_argument(
         "--run_id",
@@ -117,6 +128,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = build_parser().parse_args()
+    if not np.isfinite(args.min_dwell_s) or args.min_dwell_s < 0:
+        raise ValueError("--min_dwell_s must be finite and >= 0")
+
+    root = find_repo_root(Path(__file__))
 
     interim_root = Path(args.interim_root)
     out_root_base = Path(args.out_root)
@@ -149,6 +164,7 @@ def main() -> None:
             "smooth_sigma_bins": float(args.smooth_sigma_bins),
             "xbin_rem": int(args.xbin_rem),
             "min_speed": min_speed_cfg,
+            "min_dwell_s": float(args.min_dwell_s),
             "no_normalize_x": bool(args.no_normalize_x),
             "overwrite": bool(args.overwrite),
             "dry_run": bool(args.dry_run),
@@ -220,6 +236,7 @@ def main() -> None:
                 xbin_rem=int(args.xbin_rem),
                 nb_cond=None,
                 min_speed=min_speed,
+                min_dwell_s=float(args.min_dwell_s),
             )
             pack = build_ratemap_from_trials(
                 position_x=x,
@@ -244,6 +261,7 @@ def main() -> None:
                 "xbin_rem": int(args.xbin_rem),
                 "smooth_sigma_bins": float(args.smooth_sigma_bins),
                 "min_speed": (None if min_speed is None else float(min_speed)),
+                "min_dwell_s": float(args.min_dwell_s),
                 "n_cells": int(pack.cell_ids.size),
                 "n_trials": int(len(pack.trial_info)),
                 "n_bins": int(pack.xbin_centers.size),

@@ -11,6 +11,8 @@ This README reflects the current state of:
 - `src/placefields/interim_io.py` (interim NPZ pairing/loading/saving helpers)
 - `src/placefields/pipeline.py` (ratemap builder)
 - `src/placefields/decoding.py` (Bayesian position decoder)
+- `src/placefields/decoding_measures.py` (decoder accuracy, error, and posterior uncertainty measures)
+- `src/placefields/decoding_diagnostics.py` (decoder result tables, summaries, soft confusion matrices)
 - `src/placefields/bootstrap.py` (MATLAB-like null-map simulation + empirical p-values)
 - `src/placefields/ssi.py` (Spatial Selectivity Index + null-distribution p-values)
 - `scripts/pipelines/build_ratemap_from_interim.py` (session pairing + ratemap run)
@@ -87,6 +89,7 @@ python src/cellclass/mat_to_npz.py `
 - downsamples spike indices `25000 Hz -> 1000 Hz`
 - reconstructs session trajectory from trial vectors
 - builds ratemap tensors with `build_ratemap_from_trials(...)`
+- masks firing-rate entries with dwell below `--min_dwell_s` (default `0.05 s`)
 
 Example:
 
@@ -95,7 +98,8 @@ python scripts/pipelines/build_ratemap_from_interim.py `
   --interim_root data/interim `
   --out_root results/ratemap `
   --run_id ratemap_sm2p8_xrem10 `
-  --min_speed 2.0
+  --min_speed 2.0 `
+  --min_dwell_s 0.05
 ```
 
 ## Build Null Bootstrap Maps/P-values
@@ -124,11 +128,12 @@ python scripts/pipelines/build_ratemap_from_interim.py `
   - optional `pfnull__ssi_null_cur` (full SSI null distributions, large)
   - `run_index.csv` (per-session run status)
   - `ssi_classification.csv` (one row per `session_id`/`cell_id`/`condition_1b`,
-    with cell type/certainty, `Condition`, `direction`, `ssi_obs`, `p_value`, `SM`)
+    with cell type/certainty, optional legacy `u_type`, `Condition`, `direction`,
+    `ssi_obs`, `p_value`, `SM`)
 - classification controls:
   - `--sm_alpha` (default `0.05`, `SM=True` when `p_value < sm_alpha`)
   - `--classification_csv` (filename/path for the classification CSV)
-  - `--cell_classification_table` (optional cell classification CSV merged by `session_id`/`cell_id`)
+  - `--cell_classification_table` (default: `results/type_u_comparison_valero_feats_3/cell_classification_table.csv`; set to an empty string to skip)
 
 Example:
 
@@ -202,6 +207,23 @@ Notes:
 - Use `--decode_groupby global` as a pooled-map control against the default condition-direction decoder.
 - Leave `--group_condition_families` off to keep `PO`, `PO2`, `PO3`, `PONM`, `POM`, and `PNO`
   as distinct conditions.
+- Use `placefields.bayesian_decoding_accuracy(...)` for the paper-style
+  exact-bin posterior accuracy averaged over decoded windows:
+  mean `P(decoded bin = actual bin)`.
+- Use `placefields.position_balanced_bayesian_decoding_accuracy(...)` to first
+  average local probability within each actual position bin and then average
+  across bins; pass `exclude_edge_bins`, `include_bins`, or `x_min_cm`/`x_max_cm`
+  to exclude track endpoints or other regions.
+- Use `placefields.hard_decoding_accuracy(...)` for argmax correctness and
+  `placefields.summarize_decoding_measures(...)` for compact scalar measures.
+- Use `placefields.bayesian_decoding_result_to_frame(...)` to convert a
+  `BayesianDecodingResult` into one row per decoded window. By default, it
+  adds `cue_zone` (`rich`, `poor`, or empty) and `cue_zone_component` by
+  scaling canonical 0-100 cue layouts onto `result.xbin_edges`.
+- `placefields.summarize_decoding_by_condition(...)`,
+  `placefields.summarize_decoding_by_trial(...)`, and
+  `placefields.average_soft_confusions_by_condition(...)` provide reusable
+  diagnostics previously kept in notebooks.
 - Theta/delta filtering is not implemented because the interim trajectory files do not expose that signal.
 - FRV decoding and drop-cell subset repeats are intentionally left for a later stage.
 
@@ -385,6 +407,7 @@ Main parameters:
 - `xbin_rem` (default `0`)
 - `nb_cond` (default `None`, inferred from trials)
 - `min_speed` (default `2.0`)
+- `min_dwell_s` (default `0.0` in the library; pipeline script default `0.05`)
 
 ### `RatemapPack`
 
@@ -412,6 +435,7 @@ Notes:
 
 - smoothing is applied to `nbspk` and `dwell`, then `fr = smoothed_nbspk / smoothed_dwell`
 - low-speed filtering is controlled with `min_speed`
+- rate tensors use `NaN` for trial/bin entries whose raw or smoothed dwell is below `min_dwell_s`
 - condition-level `fr_cx`/`fr_s_cx` are unweighted means of trial-level rates (`nanmean` across trials)
 
 ## Place-Field Stage

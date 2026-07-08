@@ -7,6 +7,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from cellclass.config import DEFAULT_CELL_CLASSIFICATION_TABLE
+
 
 def parse_bool_series(values: pd.Series) -> pd.Series:
     if values.dtype == bool:
@@ -225,7 +227,7 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument(
         "--cell_classification_table",
         type=str,
-        default="results/type_u_comparison_valero_feats_3/cell_classification_table.csv",
+        default=DEFAULT_CELL_CLASSIFICATION_TABLE,
         help="Canonical session_id/cell_id cell classification table.",
     )
     ap.add_argument(

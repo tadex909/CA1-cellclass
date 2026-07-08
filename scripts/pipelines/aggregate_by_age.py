@@ -3,28 +3,18 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-import sys
 from typing import List, Dict, Tuple
 
 import numpy as np
 import pandas as pd
 
-THIS_DIR = Path(__file__).resolve().parent
-root = THIS_DIR
-while root != root.parent and not (root / "src" / "cellclass").is_dir():
-    root = root.parent
-src_dir = root / "src"
-if not (src_dir / "cellclass").is_dir():
-    raise RuntimeError(f"Could not find src/cellclass starting from {THIS_DIR}")
-sys.path.insert(0, str(src_dir))
-
-from cellclass.config import (  # noqa: E402
+from cellclass.config import (
     DEFAULT_AGE_AGGREGATION_FEATURES,
     DEFAULT_AGE_GROUPS,
     age_group_from_age,
     csv_join,
 )
-from cellclass.validation import validate_age_group_table, validate_feature_table  # noqa: E402
+from cellclass.validation import validate_age_group_table, validate_feature_table
 
 DEFAULT_FEATURES = list(DEFAULT_AGE_AGGREGATION_FEATURES)
 
@@ -101,9 +91,18 @@ def build_ml_matrix(
 
     used_cols: List[str] = []
     for col in feature_cols:
-        if col == "fr_hz" and log_fr:
+        if col in {"log_fr_hz", "log10_fr_hz"}:
             df2["log10_fr_hz"] = np.log10(df2["fr_hz"].clip(lower=1e-6))
             used_cols.append("log10_fr_hz")
+        elif col in {"log_fr_hz_session", "log10_fr_hz_session"}:
+            df2["log10_fr_hz_session"] = np.log10(df2["fr_hz_session"].clip(lower=1e-6))
+            used_cols.append("log10_fr_hz_session")
+        elif col == "fr_hz" and log_fr:
+            df2["log10_fr_hz"] = np.log10(df2["fr_hz"].clip(lower=1e-6))
+            used_cols.append("log10_fr_hz")
+        elif col == "fr_hz_session" and log_fr:
+            df2["log10_fr_hz_session"] = np.log10(df2["fr_hz_session"].clip(lower=1e-6))
+            used_cols.append("log10_fr_hz_session")
         else:
             if col in df2.columns:
                 used_cols.append(col)

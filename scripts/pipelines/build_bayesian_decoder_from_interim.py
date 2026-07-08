@@ -13,17 +13,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-# Allow running from repository root without editable install.
-THIS_DIR = Path(__file__).resolve().parent
-root = THIS_DIR
-while root != root.parent and not (root / "src" / "placefields").is_dir():
-    root = root.parent
-src_dir = root / "src"
-if not (src_dir / "placefields").is_dir():
-    raise RuntimeError(f"Could not find src/placefields starting from {THIS_DIR}")
-sys.path.insert(0, str(src_dir))
-
-from placefields import (  # noqa: E402
+from placefields import (
     BayesianDecoderConfig,
     build_regular_xbin,
     build_trial_info_from_traj,
@@ -35,7 +25,7 @@ from placefields import (  # noqa: E402
     matlab_1b_to_python_0b,
     normalize_x_to_100,
 )
-from placefields.interim_io import (  # noqa: E402
+from placefields.interim_io import (
     find_pairs,
     load_allcel_spikes,
     load_traj_fields,
@@ -109,6 +99,17 @@ def get_git_head(repo_root: Path) -> str | None:
         return proc.stdout.strip() or None
     except Exception:
         return None
+
+
+def find_repo_root(start: Path) -> Path:
+    root = start.resolve()
+    if root.is_file():
+        root = root.parent
+    while root != root.parent:
+        if (root / "pyproject.toml").exists() or (root / ".git").exists():
+            return root
+        root = root.parent
+    return start.resolve().parent
 
 
 def write_run_config(path: Path, cfg: dict[str, Any]) -> None:
@@ -419,6 +420,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = build_parser().parse_args()
+    root = find_repo_root(Path(__file__))
 
     interim_root = Path(args.interim_root)
     out_root_base = Path(args.out_root)
