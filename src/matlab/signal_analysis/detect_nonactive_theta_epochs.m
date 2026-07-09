@@ -48,7 +48,7 @@ addParameter(p, 'Fs_lfp', 1250, @is_positive_scalar); %Argument is the sampling 
 addParameter(p, 'Fs_beh', 1000, @is_positive_scalar); %Argument is the sampling frequency of the behavior data in Hz
 addParameter(p, 'analysisFs', 250, @is_positive_scalar); %Argument is the sampling frequency of the analysis grid in Hz
 addParameter(p, 'thetaBand', [6 9], @is_two_element_numeric); %Theta band frequencies in Hz
-addParameter(p, 'deltaBand', [1 4], @is_two_element_numeric); %Delta band frequencies in Hz
+addParameter(p, 'deltaBand', [0.5 2], @is_two_element_numeric); %Delta band frequencies in Hz
 addParameter(p, 'highpassCutoffHz', 0.1, ...
     @(x) isempty(x) || is_nonnegative_scalar(x)); %Frequency cutoff for hig-pass filter to remove slow drifts from the LFP
 addParameter(p, 'highpassOrder', 2, @is_positive_scalar);
@@ -103,7 +103,7 @@ end
 
 traj = read_traj_file(cfg.trajPath);
 
-startsBeh = double(traj.start(:));
+startsBeh = double(traj.start(:)); 
 stopsBeh = double(traj.stop(:));
 cond = double(traj.cond(:));
 nTrials = numel(cond);
@@ -218,6 +218,8 @@ fprintf('Behavior covers %.1f s of the %.1f s analysis span.\n', ...
 
 %% Compute wavelet theta/delta ratio
 
+%We check whether the wavelet frequencies are within the valid range (0 to Nyquist frequency) 
+%before proceeding with the wavelet transform. The Nyquist frequency is half of the analysis sampling frequency (cfg.analysisFs / 2).
 assert(all(cfg.waveletFreqs > 0) && all(cfg.waveletFreqs < cfg.analysisFs / 2), ...
     'waveletFreqs must be between 0 and analysisFs/2.');
 
@@ -667,12 +669,21 @@ end
 function info = select_best_theta_channel( ...
     lfpSource, nChannels, channelLabels, startIdx, stopIdx, cfg)
 
+    %input: lfpSource - structure containing LFP data source information
+    %       nChannels - number of LFP channels
+    %       channelLabels - labels for each LFP channel
+    %       startIdx - starting indices for LFP segments
+    %       stopIdx - stopping indices for LFP segments
+    %       cfg - configuration structure with parameters for analysis
+
+%We limit the scoring segments to a maximum duration specified in cfg.bestChannelMaxDuration    
+%If we want to use the whole duration we can set cfg.bestChannelMaxDuration to Inf
 [startIdx, stopIdx, scoreDuration] = limit_scoring_segments( ...
-    startIdx, stopIdx, cfg.Fs_lfp, cfg.bestChannelMaxDuration);
+    startIdx, stopIdx, cfg.Fs_lfp, cfg.bestChannelMaxDuration); 
 
 fprintf('Best-channel scoring uses %.1f s of selected LFP data.\n', ...
     scoreDuration);
-
+%Coefficients of the Butterworth bandpass filters for theta and delta bands are computed using the butter function. The filter order is set to 2, and the cutoff frequencies are normalized by the Nyquist frequency (half of the sampling frequency).
 [Btheta, Atheta] = butter(2, cfg.thetaBand ./ (cfg.Fs_lfp / 2), 'bandpass');
 [Bdelta, Adelta] = butter(2, cfg.deltaBand ./ (cfg.Fs_lfp / 2), 'bandpass');
 
@@ -681,6 +692,8 @@ deltaEnvelopeMedian = nan(nChannels, 1);
 scoreSamples = sum(stopIdx - startIdx + 1);
 maxMatrixElements = 60e6;
 
+%If the total number of samples across all channels is less than or equal to maxMatrixElements, we load all channels at once. 
+% Otherwise, we read one channel at a time to avoid memory issues.
 if scoreSamples * nChannels <= maxMatrixElements
     scoreLfp = load_lfp_segments_all_channels( ...
         lfpSource, 1:nChannels, startIdx, stopIdx);
@@ -726,6 +739,13 @@ end
 function [startIdx, stopIdx, scoreDuration] = limit_scoring_segments( ...
     startIdx, stopIdx, fs, maxDuration)
 
+    %input: startIdx - starting indices for LFP segments
+    %       stopIdx - stopping indices for LFP segments
+    %       fs - sampling frequency of the LFP data
+    %       maxDuration - maximum duration for scoring segments in seconds
+    %This function limits the total duration of scoring segments to a specified maximum duration. If the total duration exceeds the maximum, it proportionally reduces the lengths of the segments while maintaining their relative positions.
+    %We take a fraction proportional to the length of trials, such that the full
+    %duration is reduced to maxDuration. We then center the new segments around the original segments, while ensuring that they do not exceed the original boundaries.
 startIdx = round(startIdx(:));
 stopIdx = round(stopIdx(:));
 lengths = stopIdx - startIdx + 1;
